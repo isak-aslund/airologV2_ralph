@@ -8,6 +8,7 @@ import ActiveFilterChips from '../components/ActiveFilterChips'
 import Pagination from '../components/Pagination'
 import DeleteConfirmModal from '../components/DeleteConfirmModal'
 import ParameterModal from '../components/ParameterModal'
+import EditLogModal from '../components/EditLogModal'
 import { getLogs, downloadLog } from '../api/logs'
 import type { FlightLog, PaginatedResponse, DroneModel } from '../types'
 
@@ -54,6 +55,7 @@ export default function LogListPage() {
   const [error, setError] = useState<string | null>(null)
   const [deleteModalLog, setDeleteModalLog] = useState<FlightLog | null>(null)
   const [parameterModalLog, setParameterModalLog] = useState<FlightLog | null>(null)
+  const [editModalLog, setEditModalLog] = useState<FlightLog | null>(null)
 
   // Parse state from URL params
   const search = searchParams.get('search') || ''
@@ -191,8 +193,16 @@ export default function LogListPage() {
   }
 
   const handleEdit = (log: FlightLog) => {
-    // Placeholder - will be implemented in US-031 (Edit Log Modal)
-    console.log('Edit log:', log.id)
+    setEditModalLog(log)
+  }
+
+  const handleEditModalClose = () => {
+    setEditModalLog(null)
+  }
+
+  const handleEditSaved = () => {
+    setEditModalLog(null)
+    fetchLogs() // Refresh the table after successful edit
   }
 
   const handleDelete = (log: FlightLog) => {
@@ -279,6 +289,15 @@ export default function LogListPage() {
           logId={parameterModalLog.id}
           logTitle={parameterModalLog.title}
           onClose={handleParameterModalClose}
+        />
+      )}
+
+      {/* Edit log modal */}
+      {editModalLog && (
+        <EditLogModal
+          log={editModalLog}
+          onClose={handleEditModalClose}
+          onSaved={handleEditSaved}
         />
       )}
     </div>
