@@ -1,4 +1,47 @@
+import { useState } from 'react'
 import type { FlightLog } from '../types'
+
+// Tooltip component for truncated comments
+interface TooltipProps {
+  text: string
+  children: React.ReactNode
+}
+
+function Tooltip({ text, children }: TooltipProps) {
+  const [isVisible, setIsVisible] = useState(false)
+  const [delayHandler, setDelayHandler] = useState<ReturnType<typeof setTimeout> | null>(null)
+
+  const handleMouseEnter = () => {
+    const handler = setTimeout(() => {
+      setIsVisible(true)
+    }, 200) // 200ms delay
+    setDelayHandler(handler)
+  }
+
+  const handleMouseLeave = () => {
+    if (delayHandler) {
+      clearTimeout(delayHandler)
+      setDelayHandler(null)
+    }
+    setIsVisible(false)
+  }
+
+  return (
+    <div
+      className="relative inline-block"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      {children}
+      {isVisible && (
+        <div className="absolute z-50 bottom-full left-0 mb-2 px-3 py-2 text-sm text-white bg-gray-900 rounded-md shadow-lg max-w-sm whitespace-normal break-words">
+          {text}
+          <div className="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-900" />
+        </div>
+      )}
+    </div>
+  )
+}
 
 interface FlightLogTableProps {
   logs: FlightLog[]
@@ -30,14 +73,14 @@ function formatDate(dateStr: string | null): string {
 }
 
 // Truncate comment to 50 characters
-function truncateComment(comment: string | null): string {
+function truncateComment(comment: string | null): { text: string; isTruncated: boolean; original: string | null } {
   if (!comment) {
-    return '--'
+    return { text: '--', isTruncated: false, original: null }
   }
   if (comment.length > 50) {
-    return comment.substring(0, 50) + '...'
+    return { text: comment.substring(0, 50) + '...', isTruncated: true, original: comment }
   }
-  return comment
+  return { text: comment, isTruncated: false, original: comment }
 }
 
 // Tag badge colors - cycle through a predefined set
@@ -197,7 +240,17 @@ export default function FlightLogTable({
               </td>
               {/* Comment */}
               <td className="px-3 py-2 text-sm text-gray-500 max-w-xs">
-                {truncateComment(log.comment)}
+                {(() => {
+                  const { text, isTruncated, original } = truncateComment(log.comment)
+                  if (isTruncated && original) {
+                    return (
+                      <Tooltip text={original}>
+                        <span className="cursor-default">{text}</span>
+                      </Tooltip>
+                    )
+                  }
+                  return text
+                })()}
               </td>
               {/* Date */}
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
