@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import StatsHeader from '../components/StatsHeader'
 import FlightLogTable from '../components/FlightLogTable'
 import SearchBar from '../components/SearchBar'
@@ -8,24 +9,76 @@ import Pagination from '../components/Pagination'
 import { getLogs, downloadLog } from '../api/logs'
 import type { FlightLog, PaginatedResponse, DroneModel } from '../types'
 
-const initialFilterState: FilterState = {
-  dateFrom: '',
-  dateTo: '',
-  droneModels: [],
-  pilot: '',
-  tags: [],
+const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
+const VALID_PER_PAGE = [25, 50, 100] as const
+
+// Parse URL search params into filter state
+function parseFiltersFromParams(searchParams: URLSearchParams): FilterState {
+  const droneModelParam = searchParams.get('drone_model')
+  const droneModels = droneModelParam
+    ? droneModelParam.split(',').filter((m): m is DroneModel => DRONE_MODELS.includes(m as DroneModel))
+    : []
+
+  const tagsParam = searchParams.get('tags')
+  const tags = tagsParam ? tagsParam.split(',').filter(Boolean) : []
+
+  return {
+    dateFrom: searchParams.get('date_from') || '',
+    dateTo: searchParams.get('date_to') || '',
+    droneModels,
+    pilot: searchParams.get('pilot') || '',
+    tags,
+  }
+}
+
+// Parse pagination from URL params
+function parsePageFromParams(searchParams: URLSearchParams): number {
+  const pageParam = searchParams.get('page')
+  const parsed = pageParam ? parseInt(pageParam, 10) : 1
+  return isNaN(parsed) || parsed < 1 ? 1 : parsed
+}
+
+function parsePerPageFromParams(searchParams: URLSearchParams): 25 | 50 | 100 {
+  const perPageParam = searchParams.get('per_page')
+  const parsed = perPageParam ? parseInt(perPageParam, 10) : 25
+  return VALID_PER_PAGE.includes(parsed as 25 | 50 | 100) ? (parsed as 25 | 50 | 100) : 25
 }
 
 export default function LogListPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+
   const [logsData, setLogsData] = useState<PaginatedResponse<FlightLog> | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Search and filter state
-  const [search, setSearch] = useState('')
-  const [filters, setFilters] = useState<FilterState>(initialFilterState)
-  const [page, setPage] = useState(1)
-  const [perPage, setPerPage] = useState<25 | 50 | 100>(25)
+  // Parse state from URL params
+  const search = searchParams.get('search') || ''
+  const filters = useMemo(() => parseFiltersFromParams(searchParams), [searchParams])
+  const page = parsePageFromParams(searchParams)
+  const perPage = parsePerPageFromParams(searchParams)
+
+  // Helper to update URL params
+  const updateParams = useCallback((updates: Record<string, string | undefined>, resetPage = false) => {
+    setSearchParams((prev) => {
+      const newParams = new URLSearchParams(prev)
+
+      // Apply updates
+      for (const [key, value] of Object.entries(updates)) {
+        if (value === undefined || value === '') {
+          newParams.delete(key)
+        } else {
+          newParams.set(key, value)
+        }
+      }
+
+      // Reset page to 1 when search/filters change
+      if (resetPage) {
+        newParams.delete('page')
+      }
+
+      return newParams
+    }, { replace: false }) // Use push for browser history navigation
+  }, [setSearchParams])
 
   const fetchLogs = useCallback(async () => {
     try {
@@ -54,17 +107,18 @@ export default function LogListPage() {
     fetchLogs()
   }, [fetchLogs])
 
-  // Reset to page 1 when search or filters change
-  useEffect(() => {
-    setPage(1)
-  }, [search, filters])
-
   const handleSearch = (value: string) => {
-    setSearch(value)
+    updateParams({ search: value || undefined }, true)
   }
 
   const handleFilterChange = (newFilters: FilterState) => {
-    setFilters(newFilters)
+    updateParams({
+      date_from: newFilters.dateFrom || undefined,
+      date_to: newFilters.dateTo || undefined,
+      drone_model: newFilters.droneModels.length > 0 ? newFilters.droneModels.join(',') : undefined,
+      pilot: newFilters.pilot || undefined,
+      tags: newFilters.tags.length > 0 ? newFilters.tags.join(',') : undefined,
+    }, true)
   }
 
   const handleRemoveFilter = (type: keyof FilterState, value?: string | DroneModel) => {
@@ -94,16 +148,25 @@ export default function LogListPage() {
         break
     }
 
-    setFilters(newFilters)
+    // Update URL params based on modified filters
+    updateParams({
+      date_from: newFilters.dateFrom || undefined,
+      date_to: newFilters.dateTo || undefined,
+      drone_model: newFilters.droneModels.length > 0 ? newFilters.droneModels.join(',') : undefined,
+      pilot: newFilters.pilot || undefined,
+      tags: newFilters.tags.length > 0 ? newFilters.tags.join(',') : undefined,
+    }, true)
   }
 
   const handlePageChange = (newPage: number) => {
-    setPage(newPage)
+    updateParams({ page: newPage > 1 ? String(newPage) : undefined })
   }
 
   const handlePerPageChange = (newPerPage: 25 | 50 | 100) => {
-    setPerPage(newPerPage)
-    setPage(1) // Reset to page 1 when changing per page
+    updateParams({
+      per_page: newPerPage !== 25 ? String(newPerPage) : undefined,
+      page: undefined, // Reset to page 1
+    })
   }
 
   const handleDownload = async (log: FlightLog) => {
