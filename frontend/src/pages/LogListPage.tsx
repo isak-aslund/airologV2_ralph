@@ -9,6 +9,7 @@ import Pagination from '../components/Pagination'
 import DeleteConfirmModal from '../components/DeleteConfirmModal'
 import ParameterModal from '../components/ParameterModal'
 import EditLogModal from '../components/EditLogModal'
+import DroneLogsPanel from '../components/DroneLogsPanel'
 import { getLogs, downloadLog } from '../api/logs'
 import type { FlightLog, PaginatedResponse, DroneModel } from '../types'
 
@@ -243,6 +244,11 @@ export default function LogListPage() {
 
       {/* Filter panel */}
       <FilterPanel filters={filters} onFilterChange={handleFilterChange} />
+
+      {/* Drone logs panel - appears when drone is connected */}
+      <div className="mb-4">
+        <DroneLogsPanel />
+      </div>
 
       {error ? (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
