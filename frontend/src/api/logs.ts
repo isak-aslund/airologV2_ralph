@@ -1,5 +1,5 @@
 import client from './client'
-import type { FlightLog, FlightLogUpdate, LogListParams, PaginatedResponse } from '../types'
+import type { ExtractedMetadata, FlightLog, FlightLogUpdate, LogListParams, PaginatedResponse } from '../types'
 
 /**
  * Get paginated list of flight logs with optional filters.
@@ -61,5 +61,21 @@ export async function downloadLog(id: string): Promise<Blob> {
  */
 export async function getParameters(id: string): Promise<Record<string, unknown>> {
   const response = await client.get<Record<string, unknown>>(`/logs/${id}/parameters`)
+  return response.data
+}
+
+/**
+ * Extract metadata from a .ulg file without storing it.
+ * Used during upload to pre-populate form fields.
+ * @param file - The .ulg file to extract metadata from
+ */
+export async function extractMetadata(file: File): Promise<ExtractedMetadata> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await client.post<ExtractedMetadata>('/extract-metadata', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
   return response.data
 }

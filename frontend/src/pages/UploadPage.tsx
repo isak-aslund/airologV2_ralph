@@ -1,8 +1,13 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { extractMetadata } from '../api/logs'
+import type { ExtractedMetadata } from '../types'
 
 export default function UploadPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [isExtracting, setIsExtracting] = useState(false)
+  const [extractionError, setExtractionError] = useState<string | null>(null)
+  const [metadata, setMetadata] = useState<ExtractedMetadata | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const formatFileSize = (bytes: number): string => {
@@ -10,6 +15,58 @@ export default function UploadPage() {
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
   }
+
+  const formatDuration = (seconds: number): string => {
+    const hrs = Math.floor(seconds / 3600)
+    const mins = Math.floor((seconds % 3600) / 60)
+    const secs = Math.floor(seconds % 60)
+    if (hrs > 0) {
+      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+    }
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
+  const formatDate = (dateStr: string): string => {
+    try {
+      const date = new Date(dateStr)
+      return date.toLocaleString()
+    } catch {
+      return dateStr
+    }
+  }
+
+  const formatCoordinates = (lat: number | null, lon: number | null): string | null => {
+    if (lat === null || lon === null) return null
+    return `${lat.toFixed(6)}, ${lon.toFixed(6)}`
+  }
+
+  // Extract metadata when file is selected
+  useEffect(() => {
+    if (!selectedFile) {
+      setMetadata(null)
+      setExtractionError(null)
+      return
+    }
+
+    const doExtract = async () => {
+      setIsExtracting(true)
+      setExtractionError(null)
+      setMetadata(null)
+
+      try {
+        const result = await extractMetadata(selectedFile)
+        setMetadata(result)
+      } catch (err) {
+        setExtractionError(
+          err instanceof Error ? err.message : 'Failed to extract metadata from file'
+        )
+      } finally {
+        setIsExtracting(false)
+      }
+    }
+
+    doExtract()
+  }, [selectedFile])
 
   const handleFileSelect = useCallback((file: File | null) => {
     if (file && !file.name.toLowerCase().endsWith('.ulg')) {
@@ -47,9 +104,22 @@ export default function UploadPage() {
 
   const handleRemoveFile = () => {
     setSelectedFile(null)
+    setMetadata(null)
+    setExtractionError(null)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
+  }
+
+  // Helper to check which fields were extracted
+  const getExtractionStatus = () => {
+    if (!metadata) return []
+    const fields = []
+    if (metadata.duration_seconds !== null) fields.push('Duration')
+    if (metadata.flight_date !== null) fields.push('Flight Date')
+    if (metadata.serial_number !== null) fields.push('Serial Number')
+    if (metadata.takeoff_lat !== null && metadata.takeoff_lon !== null) fields.push('GPS Coordinates')
+    return fields
   }
 
   return (
@@ -154,12 +224,145 @@ export default function UploadPage() {
         )}
       </div>
 
-      {/* Placeholder for future form fields */}
+      {/* Metadata Extraction Section */}
       {selectedFile && (
         <div className="mt-8 p-6 bg-white rounded-lg border border-gray-200">
-          <p className="text-gray-500 text-center">
-            Metadata extraction and form fields will be added in the next stories.
-          </p>
+          {isExtracting ? (
+            // Loading State
+            <div className="flex flex-col items-center justify-center py-8">
+              <svg
+                className="animate-spin h-10 w-10 text-blue-600 mb-4"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                />
+              </svg>
+              <p className="text-gray-600 font-medium">Extracting metadata from file...</p>
+              <p className="text-sm text-gray-400 mt-1">This may take a moment for large files</p>
+            </div>
+          ) : extractionError ? (
+            // Error State
+            <div className="flex flex-col items-center justify-center py-8">
+              <div className="rounded-full bg-red-100 p-3 mb-4">
+                <svg
+                  className="h-8 w-8 text-red-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              </div>
+              <p className="text-red-600 font-medium">Failed to extract metadata</p>
+              <p className="text-sm text-gray-500 mt-1">{extractionError}</p>
+            </div>
+          ) : metadata ? (
+            // Success State - Display Extracted Metadata
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-gray-900">Extracted Metadata</h2>
+                <div className="flex items-center gap-2">
+                  <svg
+                    className="h-5 w-5 text-green-500"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                  <span className="text-sm text-green-600">
+                    {getExtractionStatus().length} fields extracted
+                  </span>
+                </div>
+              </div>
+
+              {/* Extraction Results Summary */}
+              <div className="mb-4 p-3 bg-gray-50 rounded-md">
+                <p className="text-sm text-gray-600">
+                  <span className="font-medium">Found: </span>
+                  {getExtractionStatus().length > 0
+                    ? getExtractionStatus().join(', ')
+                    : 'No metadata could be extracted'}
+                </p>
+              </div>
+
+              {/* Metadata Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Duration */}
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <p className="text-sm font-medium text-gray-500 mb-1">Duration</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {metadata.duration_seconds !== null
+                      ? formatDuration(metadata.duration_seconds)
+                      : <span className="text-gray-400 font-normal">Not available</span>
+                    }
+                  </p>
+                </div>
+
+                {/* Flight Date */}
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <p className="text-sm font-medium text-gray-500 mb-1">Flight Date</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {metadata.flight_date !== null
+                      ? formatDate(metadata.flight_date)
+                      : <span className="text-gray-400 font-normal">Not available</span>
+                    }
+                  </p>
+                </div>
+
+                {/* Serial Number */}
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <p className="text-sm font-medium text-gray-500 mb-1">Serial Number</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {metadata.serial_number !== null
+                      ? metadata.serial_number
+                      : <span className="text-gray-400 font-normal">Not available</span>
+                    }
+                  </p>
+                </div>
+
+                {/* GPS Coordinates */}
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <p className="text-sm font-medium text-gray-500 mb-1">GPS Coordinates</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {formatCoordinates(metadata.takeoff_lat, metadata.takeoff_lon)
+                      ?? <span className="text-gray-400 font-normal">Not available</span>
+                    }
+                  </p>
+                </div>
+              </div>
+
+              {/* Placeholder for form fields - to be added in US-029 */}
+              <div className="mt-6 pt-6 border-t border-gray-200">
+                <p className="text-gray-500 text-center text-sm">
+                  Form fields for additional metadata will be added in the next story.
+                </p>
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
     </div>

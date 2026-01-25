@@ -83,3 +83,12 @@ export interface LogListParams {
   date_from?: string; // ISO date
   date_to?: string; // ISO date
 }
+
+// Extracted metadata from a .ulg file
+export interface ExtractedMetadata {
+  duration_seconds: number | null;
+  flight_date: string | null; // ISO datetime string
+  serial_number: string | null;
+  takeoff_lat: number | null;
+  takeoff_lon: number | null;
+}

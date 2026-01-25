@@ -1,12 +1,16 @@
 """API router for statistics and utility endpoints."""
 
-from fastapi import APIRouter, Depends
+import os
+import tempfile
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models import DroneModel, FlightLog
-from backend.schemas import StatsResponse
+from backend.schemas import ExtractedMetadataResponse, StatsResponse
+from backend.services.ulog_parser import extract_metadata
 
 router = APIRouter(prefix="/api", tags=["stats"])
 
@@ -66,3 +70,53 @@ async def get_pilots(
         .all()
     )
     return [p[0] for p in pilots if p[0]]
+
+
+@router.post("/extract-metadata", response_model=ExtractedMetadataResponse)
+async def extract_file_metadata(
+    file: UploadFile = File(...),
+) -> dict:
+    """
+    Extract metadata from a .ulg file without storing it.
+
+    Accepts a .ulg file and returns extracted metadata:
+    - duration_seconds: Flight duration in seconds
+    - flight_date: Date/time of the flight
+    - serial_number: Drone serial number (from AIROLIT_SERIAL param)
+    - takeoff_lat: GPS latitude at takeoff
+    - takeoff_lon: GPS longitude at takeoff
+    """
+    # Validate file type
+    if not file.filename or not file.filename.lower().endswith(".ulg"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be a .ulg file",
+        )
+
+    # Save to temporary file for parsing
+    temp_file = None
+    try:
+        # Read file content
+        content = await file.read()
+
+        # Write to temporary file
+        temp_file = tempfile.NamedTemporaryFile(suffix=".ulg", delete=False)
+        temp_file.write(content)
+        temp_file.close()
+
+        # Extract metadata
+        metadata = extract_metadata(temp_file.name)
+
+        return metadata
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to extract metadata: {str(e)}",
+        )
+    finally:
+        # Clean up temporary file
+        if temp_file:
+            try:
+                os.unlink(temp_file.name)
+            except Exception:
+                pass

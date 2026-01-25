@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from backend.config import settings
 from backend.database import get_db
 from backend.models import DroneModel, FlightLog, Tag
-from backend.schemas import FlightLogResponse, FlightLogUpdate, PaginatedResponse, StatsResponse
+from backend.schemas import ExtractedMetadataResponse, FlightLogResponse, FlightLogUpdate, PaginatedResponse, StatsResponse
 from backend.services.ulog_parser import extract_metadata, get_parameters
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])

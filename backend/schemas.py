@@ -93,3 +93,14 @@ class StatsResponse(BaseModel):
     total_flights: int
     total_hours: float
     hours_by_model: dict[str, float]
+
+
+# Extracted Metadata Schema
+class ExtractedMetadataResponse(BaseModel):
+    """Schema for extracted metadata from a .ulg file."""
+
+    duration_seconds: Optional[float]
+    flight_date: Optional[datetime]
+    serial_number: Optional[str]
+    takeoff_lat: Optional[float]
+    takeoff_lon: Optional[float]
