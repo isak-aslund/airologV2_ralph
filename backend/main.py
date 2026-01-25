@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from backend.config import settings
 from backend.database import init_db
-from backend.routers import logs
+from backend.routers import logs, stats
 
 
 @asynccontextmanager
@@ -28,6 +28,7 @@ app = FastAPI(
 
 # Include routers
 app.include_router(logs.router)
+app.include_router(stats.router)
 
 
 @app.get("/health")

@@ -9,14 +9,14 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from backend.config import settings
 from backend.database import get_db
 from backend.models import DroneModel, FlightLog, Tag
-from backend.schemas import FlightLogResponse, FlightLogUpdate, PaginatedResponse
-from backend.services.ulog_parser import extract_metadata
+from backend.schemas import FlightLogResponse, FlightLogUpdate, PaginatedResponse, StatsResponse
+from backend.services.ulog_parser import extract_metadata, get_parameters
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 
@@ -325,3 +325,26 @@ async def download_log(
         filename=filename,
         media_type="application/octet-stream",
     )
+
+
+@router.get("/{log_id}/parameters")
+async def get_log_parameters(
+    log_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Get all parameters from a flight log's .ulg file."""
+    flight_log = db.query(FlightLog).filter(FlightLog.id == log_id).first()
+    if flight_log is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Flight log with id '{log_id}' not found",
+        )
+
+    file_path = Path(flight_log.file_path)
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found on disk",
+        )
+
+    return get_parameters(file_path)
