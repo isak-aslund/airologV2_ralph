@@ -1,6 +1,24 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { extractMetadata } from '../api/logs'
-import type { ExtractedMetadata } from '../types'
+import { getPilots } from '../api/pilots'
+import TagInput from '../components/TagInput'
+import type { DroneModel, ExtractedMetadata } from '../types'
+
+const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
+
+interface FormData {
+  title: string
+  pilot: string
+  drone_model: DroneModel | ''
+  comment: string
+  tags: string[]
+}
+
+interface FormErrors {
+  title?: string
+  pilot?: string
+  drone_model?: string
+}
 
 export default function UploadPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -9,6 +27,20 @@ export default function UploadPage() {
   const [extractionError, setExtractionError] = useState<string | null>(null)
   const [metadata, setMetadata] = useState<ExtractedMetadata | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Form state
+  const [formData, setFormData] = useState<FormData>({
+    title: '',
+    pilot: '',
+    drone_model: '',
+    comment: '',
+    tags: [],
+  })
+  const [formErrors, setFormErrors] = useState<FormErrors>({})
+  const [pilots, setPilots] = useState<string[]>([])
+  const [showPilotSuggestions, setShowPilotSuggestions] = useState(false)
+  const pilotInputRef = useRef<HTMLInputElement>(null)
+  const pilotContainerRef = useRef<HTMLDivElement>(null)
 
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`
@@ -40,6 +72,24 @@ export default function UploadPage() {
     return `${lat.toFixed(6)}, ${lon.toFixed(6)}`
   }
 
+  // Load pilots for autocomplete
+  useEffect(() => {
+    getPilots()
+      .then(setPilots)
+      .catch((err) => console.error('Error fetching pilots:', err))
+  }, [])
+
+  // Handle click outside for pilot suggestions
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (pilotContainerRef.current && !pilotContainerRef.current.contains(event.target as Node)) {
+        setShowPilotSuggestions(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
   // Extract metadata when file is selected
   useEffect(() => {
     if (!selectedFile) {
@@ -67,6 +117,48 @@ export default function UploadPage() {
 
     doExtract()
   }, [selectedFile])
+
+  // Validate required form fields
+  const validateForm = useCallback((): boolean => {
+    const errors: FormErrors = {}
+
+    if (!formData.title.trim()) {
+      errors.title = 'Title is required'
+    }
+
+    if (!formData.pilot.trim()) {
+      errors.pilot = 'Pilot is required'
+    }
+
+    if (!formData.drone_model) {
+      errors.drone_model = 'Drone model is required'
+    }
+
+    setFormErrors(errors)
+    return Object.keys(errors).length === 0
+  }, [formData])
+
+  // Check if form is valid for enabling submit button (without setting errors)
+  const isFormValid = formData.title.trim() && formData.pilot.trim() && formData.drone_model
+
+  // Form field handlers
+  const handleFormChange = (field: keyof FormData, value: string | string[]) => {
+    setFormData((prev) => ({ ...prev, [field]: value }))
+    // Clear error when user starts typing
+    if (formErrors[field as keyof FormErrors]) {
+      setFormErrors((prev) => ({ ...prev, [field]: undefined }))
+    }
+  }
+
+  const handlePilotSelect = (pilot: string) => {
+    handleFormChange('pilot', pilot)
+    setShowPilotSuggestions(false)
+  }
+
+  // Filter pilots based on input
+  const filteredPilots = pilots.filter((p) =>
+    p.toLowerCase().includes(formData.pilot.toLowerCase())
+  )
 
   const handleFileSelect = useCallback((file: File | null) => {
     if (file && !file.name.toLowerCase().endsWith('.ulg')) {
@@ -106,6 +198,14 @@ export default function UploadPage() {
     setSelectedFile(null)
     setMetadata(null)
     setExtractionError(null)
+    setFormData({
+      title: '',
+      pilot: '',
+      drone_model: '',
+      comment: '',
+      tags: [],
+    })
+    setFormErrors({})
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -355,11 +455,139 @@ export default function UploadPage() {
                 </div>
               </div>
 
-              {/* Placeholder for form fields - to be added in US-029 */}
+              {/* Form Fields */}
               <div className="mt-6 pt-6 border-t border-gray-200">
-                <p className="text-gray-500 text-center text-sm">
-                  Form fields for additional metadata will be added in the next story.
-                </p>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Flight Details</h3>
+                <div className="space-y-4">
+                  {/* Title */}
+                  <div>
+                    <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
+                      Title <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      id="title"
+                      value={formData.title}
+                      onChange={(e) => handleFormChange('title', e.target.value)}
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                        formErrors.title ? 'border-red-500' : 'border-gray-300'
+                      }`}
+                      placeholder="Enter a title for this flight log"
+                    />
+                    {formErrors.title && (
+                      <p className="mt-1 text-sm text-red-600">{formErrors.title}</p>
+                    )}
+                  </div>
+
+                  {/* Pilot with autocomplete */}
+                  <div ref={pilotContainerRef} className="relative">
+                    <label htmlFor="pilot" className="block text-sm font-medium text-gray-700 mb-1">
+                      Pilot <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      ref={pilotInputRef}
+                      type="text"
+                      id="pilot"
+                      value={formData.pilot}
+                      onChange={(e) => handleFormChange('pilot', e.target.value)}
+                      onFocus={() => setShowPilotSuggestions(true)}
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                        formErrors.pilot ? 'border-red-500' : 'border-gray-300'
+                      }`}
+                      placeholder="Enter pilot name"
+                      autoComplete="off"
+                    />
+                    {formErrors.pilot && (
+                      <p className="mt-1 text-sm text-red-600">{formErrors.pilot}</p>
+                    )}
+                    {/* Pilot autocomplete dropdown */}
+                    {showPilotSuggestions && filteredPilots.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                        {filteredPilots.map((pilot) => (
+                          <button
+                            key={pilot}
+                            type="button"
+                            onClick={() => handlePilotSelect(pilot)}
+                            className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none"
+                          >
+                            {pilot}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Drone Model */}
+                  <div>
+                    <label htmlFor="drone_model" className="block text-sm font-medium text-gray-700 mb-1">
+                      Drone Model <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      id="drone_model"
+                      value={formData.drone_model}
+                      onChange={(e) => handleFormChange('drone_model', e.target.value)}
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                        formErrors.drone_model ? 'border-red-500' : 'border-gray-300'
+                      }`}
+                    >
+                      <option value="">Select drone model</option>
+                      {DRONE_MODELS.map((model) => (
+                        <option key={model} value={model}>
+                          {model}
+                        </option>
+                      ))}
+                    </select>
+                    {formErrors.drone_model && (
+                      <p className="mt-1 text-sm text-red-600">{formErrors.drone_model}</p>
+                    )}
+                  </div>
+
+                  {/* Comment */}
+                  <div>
+                    <label htmlFor="comment" className="block text-sm font-medium text-gray-700 mb-1">
+                      Comment <span className="text-gray-400 text-xs">(optional)</span>
+                    </label>
+                    <textarea
+                      id="comment"
+                      value={formData.comment}
+                      onChange={(e) => handleFormChange('comment', e.target.value)}
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Add any notes or comments about this flight"
+                    />
+                  </div>
+
+                  {/* Tags */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Tags <span className="text-gray-400 text-xs">(optional)</span>
+                    </label>
+                    <TagInput
+                      selectedTags={formData.tags}
+                      onTagsChange={(tags) => handleFormChange('tags', tags)}
+                      placeholder="Search or create tags..."
+                    />
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="pt-4">
+                    <button
+                      type="button"
+                      onClick={() => validateForm()}
+                      disabled={!isFormValid}
+                      className={`w-full py-3 px-4 text-white font-semibold rounded-md transition-colors ${
+                        isFormValid
+                          ? 'bg-blue-600 hover:bg-blue-700'
+                          : 'bg-gray-400 cursor-not-allowed'
+                      }`}
+                    >
+                      Upload Flight Log
+                    </button>
+                    <p className="mt-2 text-xs text-gray-500 text-center">
+                      Upload functionality will be implemented in the next story.
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           ) : null}
