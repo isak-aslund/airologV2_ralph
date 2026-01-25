@@ -7,6 +7,7 @@ import FilterPanel, { type FilterState } from '../components/FilterPanel'
 import ActiveFilterChips from '../components/ActiveFilterChips'
 import Pagination from '../components/Pagination'
 import DeleteConfirmModal from '../components/DeleteConfirmModal'
+import ParameterModal from '../components/ParameterModal'
 import { getLogs, downloadLog } from '../api/logs'
 import type { FlightLog, PaginatedResponse, DroneModel } from '../types'
 
@@ -52,6 +53,7 @@ export default function LogListPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [deleteModalLog, setDeleteModalLog] = useState<FlightLog | null>(null)
+  const [parameterModalLog, setParameterModalLog] = useState<FlightLog | null>(null)
 
   // Parse state from URL params
   const search = searchParams.get('search') || ''
@@ -207,8 +209,11 @@ export default function LogListPage() {
   }
 
   const handleViewParameters = (log: FlightLog) => {
-    // Placeholder - will be implemented in US-025 (Parameter Viewer Modal)
-    console.log('View parameters:', log.id)
+    setParameterModalLog(log)
+  }
+
+  const handleParameterModalClose = () => {
+    setParameterModalLog(null)
   }
 
   return (
@@ -265,6 +270,15 @@ export default function LogListPage() {
           log={deleteModalLog}
           onClose={handleDeleteModalClose}
           onDeleted={handleDeleted}
+        />
+      )}
+
+      {/* Parameter viewer modal */}
+      {parameterModalLog && (
+        <ParameterModal
+          logId={parameterModalLog.id}
+          logTitle={parameterModalLog.title}
+          onClose={handleParameterModalClose}
         />
       )}
     </div>
