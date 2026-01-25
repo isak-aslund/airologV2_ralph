@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Image directory
     IMG_DIR: Path = Path("img")
 
+    # Frontend build directory
+    FRONTEND_DIST_DIR: Path = Path("frontend/dist")
+
     class Config:
         env_prefix = "FLIGHT_LOG_"
 

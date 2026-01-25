@@ -2,8 +2,9 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.config import settings
@@ -54,6 +55,29 @@ app.include_router(tags.router)
 async def health_check() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+# Serve frontend static files in production
+# Check if frontend/dist exists and mount it
+if settings.FRONTEND_DIST_DIR.exists():
+    # Mount static assets (js, css, images, etc.)
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(settings.FRONTEND_DIST_DIR / "assets")),
+        name="frontend_assets",
+    )
+
+    # Catch-all route for SPA client-side routing
+    # This must be last to not override API routes
+    @app.get("/{full_path:path}")
+    async def serve_spa(request: Request, full_path: str) -> FileResponse:
+        """Serve index.html for all non-API routes (SPA fallback)."""
+        # Check if the requested file exists in dist folder
+        file_path = settings.FRONTEND_DIST_DIR / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        # Fallback to index.html for client-side routing
+        return FileResponse(settings.FRONTEND_DIST_DIR / "index.html")
 
 
 if __name__ == "__main__":

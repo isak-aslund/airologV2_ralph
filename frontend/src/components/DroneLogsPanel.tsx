@@ -60,8 +60,6 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
 
   // Track connection state
   useEffect(() => {
-    const originalHandlers = { ...connection }
-
     // Update state change handler to track connection
     const originalOnStateChange = connection['events']?.onStateChange
     connection.setEventHandlers({

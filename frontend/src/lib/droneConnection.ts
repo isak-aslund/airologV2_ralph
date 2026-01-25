@@ -460,9 +460,9 @@ export class DroneConnection {
         const sortedOffsets = Array.from(chunks.keys()).sort((a, b) => a - b)
 
         // Calculate total size and create buffer
-        const parts: Uint8Array[] = []
+        const parts: ArrayBuffer[] = []
         for (const offset of sortedOffsets) {
-          parts.push(chunks.get(offset)!)
+          parts.push(chunks.get(offset)!.buffer as ArrayBuffer)
         }
 
         return new Blob(parts, { type: 'application/octet-stream' })
