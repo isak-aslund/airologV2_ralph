@@ -9,6 +9,7 @@ import {
   MAVLinkParser,
   createHeartbeatMessage,
   createLogRequestListMessage,
+  createLogRequestDataMessage,
   MSG_ID_HEARTBEAT,
   MSG_ID_LOG_ENTRY,
   MSG_ID_LOG_DATA,
@@ -28,6 +29,8 @@ import type {
 const BAUD_RATE = 115200
 const HEARTBEAT_INTERVAL_MS = 1000 // Send heartbeat every 1 second
 const LOG_LIST_TIMEOUT_MS = 5000 // Timeout for log list request
+const LOG_DATA_TIMEOUT_MS = 10000 // Timeout for each data chunk request
+const LOG_DATA_CHUNK_SIZE = 90 // Maximum bytes per LOG_DATA message
 
 // Connection state
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected'
@@ -37,6 +40,21 @@ export interface DroneLogEntry {
   id: number
   size: number
   timeUtc: number // Unix timestamp in seconds
+}
+
+// Download progress tracking
+export interface DownloadProgress {
+  logId: number
+  bytesReceived: number
+  totalBytes: number
+  percent: number
+}
+
+// Downloaded log result
+export interface DownloadedLog {
+  id: number
+  blob: Blob
+  timeUtc: number
 }
 
 // Event types for connection callbacks
@@ -353,6 +371,157 @@ export class DroneConnection {
         cleanup()
         reject(error)
       })
+    })
+  }
+
+  /**
+   * Download a single log from the drone
+   * Sends LOG_REQUEST_DATA messages and collects LOG_DATA responses
+   *
+   * @param logEntry - The log entry to download (from requestLogList)
+   * @param onProgress - Optional callback for progress updates
+   * @returns Promise that resolves with the downloaded log as a Blob
+   */
+  async downloadLog(
+    logEntry: DroneLogEntry,
+    onProgress?: (progress: DownloadProgress) => void
+  ): Promise<DownloadedLog> {
+    if (this._state !== 'connected') {
+      throw new Error('Not connected')
+    }
+
+    if (this._droneSysId === null) {
+      throw new Error('Drone system ID not yet received. Wait for heartbeat.')
+    }
+
+    return new Promise<DownloadedLog>((resolve, reject) => {
+      const logId = logEntry.id
+      const totalSize = logEntry.size
+      const chunks: Map<number, Uint8Array> = new Map() // offset -> data
+      let bytesReceived = 0
+      let currentOffset = 0
+      let timeoutId: ReturnType<typeof setTimeout> | null = null
+      let isComplete = false
+
+      // Store the original onLogData handler
+      const originalOnLogData = this.events.onLogData
+
+      // Cleanup function
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+          timeoutId = null
+        }
+        // Restore original handler
+        this.events.onLogData = originalOnLogData
+      }
+
+      // Reset timeout on each data chunk received
+      const resetTimeout = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+        }
+        timeoutId = setTimeout(() => {
+          cleanup()
+          if (bytesReceived === 0) {
+            reject(new Error('Timeout: No data received from drone.'))
+          } else if (bytesReceived < totalSize) {
+            reject(new Error(`Download incomplete: received ${bytesReceived} of ${totalSize} bytes`))
+          }
+        }, LOG_DATA_TIMEOUT_MS)
+      }
+
+      // Request next chunk of data
+      const requestNextChunk = () => {
+        if (currentOffset >= totalSize || isComplete) {
+          return
+        }
+
+        const remaining = totalSize - currentOffset
+        const chunkSize = Math.min(remaining, LOG_DATA_CHUNK_SIZE)
+
+        const requestMessage = createLogRequestDataMessage(
+          this._droneSysId!,
+          MAV_COMP_ID_AUTOPILOT1,
+          logId,
+          currentOffset,
+          chunkSize
+        )
+
+        this.send(requestMessage).catch((error) => {
+          cleanup()
+          reject(error)
+        })
+      }
+
+      // Assemble all chunks into final blob
+      const assembleBlob = (): Blob => {
+        // Create a sorted array of offsets
+        const sortedOffsets = Array.from(chunks.keys()).sort((a, b) => a - b)
+
+        // Calculate total size and create buffer
+        const parts: Uint8Array[] = []
+        for (const offset of sortedOffsets) {
+          parts.push(chunks.get(offset)!)
+        }
+
+        return new Blob(parts, { type: 'application/octet-stream' })
+      }
+
+      // Set up handler to collect LOG_DATA messages
+      this.events.onLogData = (data) => {
+        // Call original handler if it exists
+        originalOnLogData?.(data)
+
+        // Only process data for our log
+        if (data.id !== logId) {
+          return
+        }
+
+        // Store the chunk
+        if (!chunks.has(data.ofs)) {
+          chunks.set(data.ofs, data.data)
+          bytesReceived += data.count
+        }
+
+        // Report progress
+        if (onProgress) {
+          onProgress({
+            logId,
+            bytesReceived,
+            totalBytes: totalSize,
+            percent: Math.round((bytesReceived / totalSize) * 100),
+          })
+        }
+
+        // Reset timeout since we received data
+        resetTimeout()
+
+        // Check if we've received all data
+        if (bytesReceived >= totalSize) {
+          isComplete = true
+          cleanup()
+
+          // Assemble the blob
+          const blob = assembleBlob()
+          resolve({
+            id: logId,
+            blob,
+            timeUtc: logEntry.timeUtc,
+          })
+        } else {
+          // Request next chunk
+          // The data offset + count tells us where the next chunk should start
+          currentOffset = data.ofs + data.count
+          requestNextChunk()
+        }
+      }
+
+      // Start timeout
+      resetTimeout()
+
+      // Start requesting data from the beginning
+      requestNextChunk()
     })
   }
 

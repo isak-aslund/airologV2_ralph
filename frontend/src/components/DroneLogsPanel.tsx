@@ -1,9 +1,21 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getDroneConnection } from '../lib/droneConnection'
-import type { ConnectionState, DroneLogEntry } from '../lib/droneConnection'
+import type { ConnectionState, DroneLogEntry, DownloadProgress, DownloadedLog } from '../lib/droneConnection'
 
 interface DroneLogsPanelProps {
   onLogsSelected?: (logs: DroneLogEntry[]) => void
+  onLogsDownloaded?: (logs: DownloadedLog[]) => void
+}
+
+// Download state for tracking multiple log downloads
+interface DownloadState {
+  isDownloading: boolean
+  currentLogId: number | null
+  currentProgress: DownloadProgress | null
+  completedCount: number
+  totalCount: number
+  downloadedLogs: DownloadedLog[]
+  error: string | null
 }
 
 // Format bytes to human readable size
@@ -26,12 +38,21 @@ function formatDate(utcSeconds: number): string {
   return date.toISOString().split('T')[0]
 }
 
-export default function DroneLogsPanel({ onLogsSelected }: DroneLogsPanelProps) {
+export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: DroneLogsPanelProps) {
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
   const [logs, setLogs] = useState<DroneLogEntry[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [downloadState, setDownloadState] = useState<DownloadState>({
+    isDownloading: false,
+    currentLogId: null,
+    currentProgress: null,
+    completedCount: 0,
+    totalCount: 0,
+    downloadedLogs: [],
+    error: null,
+  })
 
   const connection = getDroneConnection()
 
@@ -123,6 +144,76 @@ export default function DroneLogsPanel({ onLogsSelected }: DroneLogsPanelProps) 
     })
   }
 
+  // Download selected logs from drone
+  const handleDownloadSelected = useCallback(async () => {
+    const selectedLogs = logs.filter((log) => selectedIds.has(log.id))
+    if (selectedLogs.length === 0) return
+
+    setDownloadState({
+      isDownloading: true,
+      currentLogId: null,
+      currentProgress: null,
+      completedCount: 0,
+      totalCount: selectedLogs.length,
+      downloadedLogs: [],
+      error: null,
+    })
+
+    const downloadedLogs: DownloadedLog[] = []
+
+    for (let i = 0; i < selectedLogs.length; i++) {
+      const logEntry = selectedLogs[i]
+
+      setDownloadState((prev) => ({
+        ...prev,
+        currentLogId: logEntry.id,
+        currentProgress: {
+          logId: logEntry.id,
+          bytesReceived: 0,
+          totalBytes: logEntry.size,
+          percent: 0,
+        },
+      }))
+
+      try {
+        const downloadedLog = await connection.downloadLog(logEntry, (progress) => {
+          setDownloadState((prev) => ({
+            ...prev,
+            currentProgress: progress,
+          }))
+        })
+
+        downloadedLogs.push(downloadedLog)
+
+        setDownloadState((prev) => ({
+          ...prev,
+          completedCount: i + 1,
+          downloadedLogs: [...prev.downloadedLogs, downloadedLog],
+        }))
+      } catch (err) {
+        setDownloadState((prev) => ({
+          ...prev,
+          isDownloading: false,
+          error: `Failed to download log ${logEntry.id}: ${(err as Error).message}`,
+        }))
+        return
+      }
+    }
+
+    // All downloads completed
+    setDownloadState((prev) => ({
+      ...prev,
+      isDownloading: false,
+      currentLogId: null,
+      currentProgress: null,
+    }))
+
+    // Notify parent of downloaded logs
+    if (onLogsDownloaded && downloadedLogs.length > 0) {
+      onLogsDownloaded(downloadedLogs)
+    }
+  }, [logs, selectedIds, connection, onLogsDownloaded])
+
   const allSelected = logs.length > 0 && selectedIds.size === logs.length
   const noneSelected = selectedIds.size === 0
 
@@ -154,10 +245,27 @@ export default function DroneLogsPanel({ onLogsSelected }: DroneLogsPanelProps) 
             Deselect All
           </button>
 
+          {/* Download Selected button */}
+          <button
+            onClick={handleDownloadSelected}
+            disabled={loading || noneSelected || downloadState.isDownloading}
+            className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-1"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              />
+            </svg>
+            Download Selected
+          </button>
+
           {/* Refresh button */}
           <button
             onClick={fetchLogs}
-            disabled={loading}
+            disabled={loading || downloadState.isDownloading}
             className="p-1 text-gray-500 hover:text-gray-700 disabled:text-gray-300 disabled:cursor-not-allowed"
             title="Refresh log list"
           >
@@ -190,6 +298,64 @@ export default function DroneLogsPanel({ onLogsSelected }: DroneLogsPanelProps) 
             />
           </svg>
           {error}
+        </div>
+      )}
+
+      {/* Download error message */}
+      {downloadState.error && (
+        <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-700 flex items-center gap-2">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          {downloadState.error}
+        </div>
+      )}
+
+      {/* Download progress bar */}
+      {downloadState.isDownloading && downloadState.currentProgress && (
+        <div className="bg-blue-50 border-b border-blue-200 px-4 py-3">
+          <div className="flex items-center justify-between text-sm text-blue-700 mb-2">
+            <span>
+              Downloading log {downloadState.currentLogId}
+              {downloadState.totalCount > 1 && (
+                <span className="text-blue-500">
+                  {' '}({downloadState.completedCount + 1} of {downloadState.totalCount})
+                </span>
+              )}
+            </span>
+            <span>
+              {formatSize(downloadState.currentProgress.bytesReceived)} / {formatSize(downloadState.currentProgress.totalBytes)}
+            </span>
+          </div>
+          <div className="w-full bg-blue-200 rounded-full h-2.5">
+            <div
+              className="bg-blue-600 h-2.5 rounded-full transition-all duration-150"
+              style={{ width: `${downloadState.currentProgress.percent}%` }}
+            />
+          </div>
+          <div className="text-xs text-blue-600 mt-1 text-right">
+            {downloadState.currentProgress.percent}%
+          </div>
+        </div>
+      )}
+
+      {/* Download complete notification */}
+      {!downloadState.isDownloading && downloadState.downloadedLogs.length > 0 && (
+        <div className="bg-green-50 border-b border-green-200 px-4 py-2 text-sm text-green-700 flex items-center gap-2">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M5 13l4 4L19 7"
+            />
+          </svg>
+          {downloadState.downloadedLogs.length} log{downloadState.downloadedLogs.length !== 1 ? 's' : ''} downloaded successfully
         </div>
       )}
 
