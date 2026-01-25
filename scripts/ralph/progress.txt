@@ -415,3 +415,43 @@ Started: Sun Jan 25 22:17:42 CET 2026
   - US-021 ActiveFilterChips integration included full state management setup
   - Typecheck verified with `cd frontend && npx tsc --noEmit`
 ---
+
+## 2026-01-25 - US-023
+- What was implemented:
+  - Added URL state synchronization to LogListPage using `useSearchParams` from react-router-dom
+  - All filter state (search, drone_model, pilot, tags, date_from, date_to, page, per_page) synced to URL query params
+  - Page loads with filters from URL if present (via parse functions)
+  - Browser back/forward navigates filter history (using `replace: false` in setSearchParams)
+  - Sharing URL preserves filter state
+  - Default values (page=1, per_page=25) are omitted from URL for cleaner URLs
+- Files changed:
+  - `frontend/src/pages/LogListPage.tsx` (modified - replaced local state with URL-based state)
+- **Learnings for future iterations:**
+  - Use `useSearchParams` from react-router-dom for URL state sync
+  - `useMemo` for derived filter state from searchParams to avoid unnecessary re-renders
+  - Pattern: `setSearchParams((prev) => {...}, { replace: false })` enables browser history navigation
+  - Omit default values from URL for cleaner shareable links
+  - Use type guards like `(m): m is DroneModel => DRONE_MODELS.includes(m as DroneModel)` for safe parsing
+---
+
+## 2026-01-25 - US-024
+- What was implemented:
+  - Created `frontend/src/components/DeleteConfirmModal.tsx` component
+  - Modal shows log title with warning message about permanent deletion
+  - Warning icon with red background for visual emphasis
+  - Cancel button closes modal (also closes on backdrop click)
+  - Delete button calls deleteLog API and closes modal on success
+  - Shows error message in red alert box if delete fails
+  - Loading state with spinner during delete operation
+  - Buttons disabled during loading to prevent double-submission
+  - Integrated modal into LogListPage with state management
+  - Table refreshes after successful delete via fetchLogs() callback
+- Files changed:
+  - `frontend/src/components/DeleteConfirmModal.tsx` (new)
+  - `frontend/src/pages/LogListPage.tsx` (modified - added modal import, state, and integration)
+- **Learnings for future iterations:**
+  - Modal pattern: use fixed inset-0 for full-screen overlay with z-50 for stacking
+  - Backdrop click to close: add onClick handler on backdrop div, not the modal container
+  - Loading state in modals: disable all buttons during async operations
+  - onDeleted callback pattern: close modal and trigger parent refresh
+---

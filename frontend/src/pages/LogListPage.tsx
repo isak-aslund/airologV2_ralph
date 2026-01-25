@@ -6,6 +6,7 @@ import SearchBar from '../components/SearchBar'
 import FilterPanel, { type FilterState } from '../components/FilterPanel'
 import ActiveFilterChips from '../components/ActiveFilterChips'
 import Pagination from '../components/Pagination'
+import DeleteConfirmModal from '../components/DeleteConfirmModal'
 import { getLogs, downloadLog } from '../api/logs'
 import type { FlightLog, PaginatedResponse, DroneModel } from '../types'
 
@@ -50,6 +51,7 @@ export default function LogListPage() {
   const [logsData, setLogsData] = useState<PaginatedResponse<FlightLog> | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [deleteModalLog, setDeleteModalLog] = useState<FlightLog | null>(null)
 
   // Parse state from URL params
   const search = searchParams.get('search') || ''
@@ -192,8 +194,16 @@ export default function LogListPage() {
   }
 
   const handleDelete = (log: FlightLog) => {
-    // Placeholder - will be implemented in US-024 (Delete Confirmation Modal)
-    console.log('Delete log:', log.id)
+    setDeleteModalLog(log)
+  }
+
+  const handleDeleteModalClose = () => {
+    setDeleteModalLog(null)
+  }
+
+  const handleDeleted = () => {
+    setDeleteModalLog(null)
+    fetchLogs() // Refresh the table after successful delete
   }
 
   const handleViewParameters = (log: FlightLog) => {
@@ -247,6 +257,15 @@ export default function LogListPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteModalLog && (
+        <DeleteConfirmModal
+          log={deleteModalLog}
+          onClose={handleDeleteModalClose}
+          onDeleted={handleDeleted}
+        />
       )}
     </div>
   )
