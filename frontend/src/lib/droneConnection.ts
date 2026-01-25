@@ -8,12 +8,14 @@
 import {
   MAVLinkParser,
   createHeartbeatMessage,
+  createLogRequestListMessage,
   MSG_ID_HEARTBEAT,
   MSG_ID_LOG_ENTRY,
   MSG_ID_LOG_DATA,
   parseHeartbeat,
   parseLogEntry,
   parseLogData,
+  MAV_COMP_ID_AUTOPILOT1,
 } from './mavlink'
 import type {
   MAVLinkMessage,
@@ -25,9 +27,17 @@ import type {
 // Connection constants
 const BAUD_RATE = 115200
 const HEARTBEAT_INTERVAL_MS = 1000 // Send heartbeat every 1 second
+const LOG_LIST_TIMEOUT_MS = 5000 // Timeout for log list request
 
 // Connection state
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected'
+
+// Drone log entry (from log list)
+export interface DroneLogEntry {
+  id: number
+  size: number
+  timeUtc: number // Unix timestamp in seconds
+}
 
 // Event types for connection callbacks
 export interface DroneConnectionEvents {
@@ -254,6 +264,96 @@ export class DroneConnection {
     }
 
     await this.writer.write(data)
+  }
+
+  /**
+   * Request the list of available logs from the drone
+   * Sends LOG_REQUEST_LIST and collects LOG_ENTRY responses
+   *
+   * @returns Promise that resolves with array of log entries, or rejects on timeout
+   */
+  async requestLogList(): Promise<DroneLogEntry[]> {
+    if (this._state !== 'connected') {
+      throw new Error('Not connected')
+    }
+
+    if (this._droneSysId === null) {
+      throw new Error('Drone system ID not yet received. Wait for heartbeat.')
+    }
+
+    return new Promise<DroneLogEntry[]>((resolve, reject) => {
+      const logs: DroneLogEntry[] = []
+      let expectedTotal = 0
+      let receivedCount = 0
+      let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+      // Store the original onLogEntry handler
+      const originalOnLogEntry = this.events.onLogEntry
+
+      // Cleanup function
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+          timeoutId = null
+        }
+        // Restore original handler
+        this.events.onLogEntry = originalOnLogEntry
+      }
+
+      // Set up timeout
+      timeoutId = setTimeout(() => {
+        cleanup()
+        if (receivedCount === 0) {
+          reject(new Error('Timeout: No response from drone. Make sure the drone is connected and powered on.'))
+        } else {
+          // Partial response - return what we got
+          resolve(logs)
+        }
+      }, LOG_LIST_TIMEOUT_MS)
+
+      // Set up handler to collect LOG_ENTRY messages
+      this.events.onLogEntry = (entry) => {
+        // Call original handler if it exists
+        originalOnLogEntry?.(entry)
+
+        // Track expected total from first entry
+        if (receivedCount === 0 && entry.numLogs > 0) {
+          expectedTotal = entry.numLogs
+        }
+
+        // Add to logs list (ignore entries with size 0 which indicate empty slots)
+        if (entry.size > 0) {
+          logs.push({
+            id: entry.id,
+            size: entry.size,
+            timeUtc: entry.timeUtc,
+          })
+        }
+
+        receivedCount++
+
+        // Check if we've received all expected entries
+        if (expectedTotal > 0 && receivedCount >= expectedTotal) {
+          cleanup()
+          // Sort by ID descending (most recent first based on ID)
+          logs.sort((a, b) => b.id - a.id)
+          resolve(logs)
+        }
+      }
+
+      // Send LOG_REQUEST_LIST message
+      const requestMessage = createLogRequestListMessage(
+        this._droneSysId!,
+        MAV_COMP_ID_AUTOPILOT1,
+        0, // start from first log
+        0xffff // request all logs
+      )
+
+      this.send(requestMessage).catch((error) => {
+        cleanup()
+        reject(error)
+      })
+    })
   }
 
   /**
