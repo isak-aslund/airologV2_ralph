@@ -43,6 +43,21 @@ export default function LogListPage() {
     }
   }
 
+  const handleEdit = (log: FlightLog) => {
+    // Placeholder - will be implemented in US-031 (Edit Log Modal)
+    console.log('Edit log:', log.id)
+  }
+
+  const handleDelete = (log: FlightLog) => {
+    // Placeholder - will be implemented in US-024 (Delete Confirmation Modal)
+    console.log('Delete log:', log.id)
+  }
+
+  const handleViewParameters = (log: FlightLog) => {
+    // Placeholder - will be implemented in US-025 (Parameter Viewer Modal)
+    console.log('View parameters:', log.id)
+  }
+
   return (
     <div className="container mx-auto p-4">
       <StatsHeader />
@@ -56,7 +71,10 @@ export default function LogListPage() {
         <FlightLogTable
           logs={logsData?.items ?? []}
           loading={loading}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
           onDownload={handleDownload}
+          onViewParameters={handleViewParameters}
         />
       )}
     </div>
