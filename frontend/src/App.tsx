@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
 import LogListPage from './pages/LogListPage'
 import UploadPage from './pages/UploadPage'
+import DroneConnection from './components/DroneConnection'
 import './App.css'
 
 function App() {
@@ -13,6 +14,9 @@ function App() {
               Flight Log Manager
             </Link>
             <nav className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
+              <div className="relative">
+                <DroneConnection />
+              </div>
               <Link
                 to="/"
                 className="text-gray-600 hover:text-gray-900 font-medium text-sm sm:text-base"

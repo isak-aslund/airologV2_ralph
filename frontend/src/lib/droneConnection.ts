@@ -7,7 +7,6 @@
 
 import {
   MAVLinkParser,
-  MAVLinkMessage,
   createHeartbeatMessage,
   MSG_ID_HEARTBEAT,
   MSG_ID_LOG_ENTRY,
@@ -15,6 +14,9 @@ import {
   parseHeartbeat,
   parseLogEntry,
   parseLogData,
+} from './mavlink'
+import type {
+  MAVLinkMessage,
   HeartbeatMessage,
   LogEntryMessage,
   LogDataMessage,
