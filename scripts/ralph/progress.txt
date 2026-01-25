@@ -455,3 +455,46 @@ Started: Sun Jan 25 22:17:42 CET 2026
   - Loading state in modals: disable all buttons during async operations
   - onDeleted callback pattern: close modal and trigger parent refresh
 ---
+
+## 2026-01-25 - US-032
+- What was implemented:
+  - Added responsive layout support for tablet and desktop screen sizes
+  - FlightLogTable: Table uses `min-w-[900px] lg:min-w-full` to force horizontal scroll on screens < 1024px
+  - FilterPanel: Uses window width check on mount to collapse by default on screens < 768px
+  - StatsHeader: Uses `flex-col sm:flex-row` pattern to stack vertically on small screens
+  - App.tsx header: Responsive font sizes, padding, and gap adjustments using sm: breakpoints
+  - UploadPage: Responsive container padding and heading sizes
+  - Minimum supported width of 320px already set in index.css body rule
+- Files changed:
+  - `frontend/src/components/FlightLogTable.tsx` (modified - added min-width constraint)
+  - `frontend/src/components/FilterPanel.tsx` (modified - responsive initial state)
+  - `frontend/src/components/StatsHeader.tsx` (modified - responsive flex layout)
+  - `frontend/src/App.tsx` (modified - responsive header)
+  - `frontend/src/pages/UploadPage.tsx` (modified - responsive padding)
+- **Learnings for future iterations:**
+  - Horizontal scroll pattern: use `overflow-x-auto` on wrapper + explicit `min-w-[Xpx]` on table
+  - Responsive initial state pattern: use function initializer in useState with window.innerWidth check
+  - TailwindCSS responsive: stack with `flex-col sm:flex-row`, adjust gaps with `gap-4 sm:gap-6`
+  - Small screen adaptations: smaller text `text-lg sm:text-xl`, smaller padding `px-3 sm:px-4`
+---
+
+## 2026-01-25 - US-025
+- What was implemented:
+  - Created `frontend/src/components/ParameterModal.tsx` for viewing flight parameters
+  - Modal fetches parameters from `/api/logs/{id}/parameters` using `getParameters` API function
+  - Loading spinner shown while fetching with animate-spin SVG
+  - Scrollable table displays parameters with Name and Value columns
+  - Search input filters parameters by name (case-insensitive)
+  - Close button (X) in header and Close button in footer to dismiss modal
+  - Parameters sorted alphabetically by name
+  - Shows count of displayed parameters vs total (e.g., "X of Y parameters")
+  - Integrated modal into LogListPage with state management for parameterModalLog
+- Files changed:
+  - `frontend/src/components/ParameterModal.tsx` (new)
+  - `frontend/src/pages/LogListPage.tsx` (modified - added modal import and integration)
+- **Learnings for future iterations:**
+  - Modal pattern: use flex-col with max-h-[80vh] and flex-1 overflow-y-auto for scrollable content area
+  - Parameter table uses font-mono for values for better readability of numeric/technical data
+  - Use sticky top-0 on thead for fixed header in scrollable table
+  - Filter with useMemo for performance when filtering large parameter lists
+---
