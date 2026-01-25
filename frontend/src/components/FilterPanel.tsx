@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getPilots } from '../api/pilots'
-import type { DroneModel } from '../types'
+import { getTags } from '../api/tags'
+import type { DroneModel, Tag } from '../types'
 
 const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
 
@@ -9,6 +10,7 @@ export interface FilterState {
   dateTo: string
   droneModels: DroneModel[]
   pilot: string
+  tags: string[]
 }
 
 interface FilterPanelProps {
@@ -20,6 +22,11 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
   const [isExpanded, setIsExpanded] = useState(false)
   const [pilots, setPilots] = useState<string[]>([])
   const [pilotsLoading, setPilotsLoading] = useState(false)
+  const [allTags, setAllTags] = useState<Tag[]>([])
+  const [tagsLoading, setTagsLoading] = useState(false)
+  const [tagDropdownOpen, setTagDropdownOpen] = useState(false)
+  const [tagSearch, setTagSearch] = useState('')
+  const tagDropdownRef = useRef<HTMLDivElement>(null)
 
   // Fetch pilots list on mount
   useEffect(() => {
@@ -35,6 +42,33 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
       }
     }
     fetchPilots()
+  }, [])
+
+  // Fetch tags list on mount
+  useEffect(() => {
+    async function fetchTags() {
+      try {
+        setTagsLoading(true)
+        const data = await getTags()
+        setAllTags(data)
+      } catch (err) {
+        console.error('Error fetching tags:', err)
+      } finally {
+        setTagsLoading(false)
+      }
+    }
+    fetchTags()
+  }, [])
+
+  // Close tag dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (tagDropdownRef.current && !tagDropdownRef.current.contains(event.target as Node)) {
+        setTagDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
   function handleDateFromChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -68,21 +102,46 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     })
   }
 
+  function handleTagToggle(tagName: string) {
+    const isSelected = filters.tags.includes(tagName)
+    const newTags = isSelected
+      ? filters.tags.filter((t) => t !== tagName)
+      : [...filters.tags, tagName]
+    onFilterChange({
+      ...filters,
+      tags: newTags,
+    })
+  }
+
+  function handleRemoveTag(tagName: string) {
+    onFilterChange({
+      ...filters,
+      tags: filters.tags.filter((t) => t !== tagName),
+    })
+  }
+
   function handleClearAll() {
     onFilterChange({
       dateFrom: '',
       dateTo: '',
       droneModels: [],
       pilot: '',
+      tags: [],
     })
   }
+
+  // Filter tags based on search input
+  const filteredTags = allTags.filter((tag) =>
+    tag.name.toLowerCase().includes(tagSearch.toLowerCase())
+  )
 
   // Check if any filters are active
   const hasActiveFilters =
     filters.dateFrom !== '' ||
     filters.dateTo !== '' ||
     filters.droneModels.length > 0 ||
-    filters.pilot !== ''
+    filters.pilot !== '' ||
+    filters.tags.length > 0
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg mb-4">
@@ -128,7 +187,7 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
       {/* Collapsible filter content */}
       {isExpanded && (
         <div className="px-4 pb-4 border-t border-gray-200">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mt-4">
             {/* Date range - From */}
             <div>
               <label htmlFor="date-from" className="block text-sm font-medium text-gray-700 mb-1">
@@ -195,7 +254,94 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
                 ))}
               </select>
             </div>
+
+            {/* Tag filter with multi-select dropdown */}
+            <div ref={tagDropdownRef} className="relative">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tags</label>
+              <button
+                type="button"
+                onClick={() => setTagDropdownOpen(!tagDropdownOpen)}
+                disabled={tagsLoading}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed flex items-center justify-between"
+              >
+                <span className={filters.tags.length === 0 ? 'text-gray-500' : ''}>
+                  {filters.tags.length === 0
+                    ? 'Select tags...'
+                    : `${filters.tags.length} tag${filters.tags.length > 1 ? 's' : ''} selected`}
+                </span>
+                <svg
+                  className={`h-5 w-5 text-gray-400 transition-transform ${tagDropdownOpen ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {/* Dropdown menu */}
+              {tagDropdownOpen && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-hidden">
+                  {/* Search input in dropdown */}
+                  <div className="p-2 border-b border-gray-200">
+                    <input
+                      type="text"
+                      placeholder="Search tags..."
+                      value={tagSearch}
+                      onChange={(e) => setTagSearch(e.target.value)}
+                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  {/* Tag list */}
+                  <div className="max-h-40 overflow-y-auto">
+                    {filteredTags.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-gray-500">
+                        {allTags.length === 0 ? 'No tags available' : 'No matching tags'}
+                      </div>
+                    ) : (
+                      filteredTags.map((tag) => (
+                        <label
+                          key={tag.id}
+                          className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={filters.tags.includes(tag.name)}
+                            onChange={() => handleTagToggle(tag.name)}
+                            className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-gray-700">{tag.name}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
+
+          {/* Selected tags as removable chips */}
+          {filters.tags.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {filters.tags.map((tagName) => (
+                <span
+                  key={tagName}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-sm bg-blue-100 text-blue-800 rounded-full"
+                >
+                  {tagName}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveTag(tagName)}
+                    className="hover:bg-blue-200 rounded-full p-0.5"
+                  >
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Clear All Filters button */}
           {hasActiveFilters && (
