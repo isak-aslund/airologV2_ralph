@@ -498,3 +498,201 @@ Started: Sun Jan 25 22:17:42 CET 2026
   - Use sticky top-0 on thead for fixed header in scrollable table
   - Filter with useMemo for performance when filtering large parameter lists
 ---
+
+## 2026-01-25 - US-033
+- What was implemented:
+  - Created `frontend/src/lib/mavlink.ts` with full MAVLink v2 protocol implementation
+  - `MAVLinkParser` class for parsing MAVLink v2 messages from byte stream with state machine
+  - `createHeartbeatMessage()` for GCS heartbeat to maintain drone connection
+  - `createLogRequestListMessage()` for requesting available logs from drone
+  - `createLogRequestDataMessage()` for requesting log data chunks
+  - `parseLogEntry()` for parsing LOG_ENTRY responses (log metadata: id, size, time_utc, etc.)
+  - `parseLogData()` for parsing LOG_DATA responses (actual log content)
+  - `parseHeartbeat()` for parsing HEARTBEAT messages
+  - Full CRC-16/MCRF4XX checksum calculation and verification
+  - Message ID constants and component ID constants exported
+- Files changed:
+  - `frontend/src/lib/mavlink.ts` (new)
+- **Learnings for future iterations:**
+  - MAVLink v2 header structure: STX(1) + len(1) + incompat(1) + compat(1) + seq(1) + sysid(1) + compid(1) + msgid(3) = 10 bytes
+  - CRC is calculated over header bytes 1-9 + payload + CRC_EXTRA seed specific to each message type
+  - LOG_DATA payload: id(2) + ofs(4) + count(1) + data[90] - count indicates actual bytes in data
+  - Multi-byte fields in MAVLink are little-endian
+  - Use state machine pattern for parsing streaming protocol data (IDLE -> HEADER -> PAYLOAD -> CRC)
+---
+
+## 2026-01-25 - US-034
+- What was implemented:
+  - Created `frontend/src/lib/droneConnection.ts` for Web Serial API connection management
+  - `DroneConnection` class with full connection lifecycle management (connect, disconnect, cleanup)
+  - `requestPort()` function with USB vendor ID filters for common PX4 flight controllers
+  - Connection at 115200 baud rate using Web Serial API
+  - Periodic heartbeat sending (every 1 second) to maintain drone connection
+  - Async read loop that receives and parses incoming MAVLink messages using MAVLinkParser
+  - Event-driven architecture with callbacks: onStateChange, onHeartbeat, onLogEntry, onLogData, onError, onMessage
+  - `isWebSerialSupported()` helper function for feature detection
+  - Singleton pattern with `getDroneConnection()` for global access
+- Files changed:
+  - `frontend/src/lib/droneConnection.ts` (new)
+- **Learnings for future iterations:**
+  - Web Serial API: use `navigator.serial.requestPort({ filters })` with USB vendor IDs for device filtering
+  - Connection flow: requestPort() -> port.open({ baudRate }) -> getReader()/getWriter() -> start read loop
+  - Cleanup pattern: stop intervals first, then cancel reader, release locks, close port
+  - Common PX4 USB vendor IDs: 0x26ac (Hex), 0x3185 (CUAV), 0x2dae (Holybro), 0x0483 (STM), 0x1209 (3DR)
+  - Use `ReadableStreamDefaultReader<Uint8Array>` type for serial port reader
+---
+
+## 2026-01-25 - US-035
+- What was implemented:
+  - Created `frontend/src/components/DroneConnection.tsx` for drone connection UI
+  - Connect Drone button in header (only visible if Web Serial API is supported)
+  - Status indicator: gray (disconnected), yellow pulsing (connecting), green (connected)
+  - Displays drone system ID as serial number when connected (e.g., "SYS-1")
+  - Disconnect button with red styling when connected
+  - Error message appears below button with auto-dismiss after 5 seconds
+  - Created `frontend/src/types/web-serial.d.ts` for Web Serial API TypeScript declarations
+  - Fixed type imports in droneConnection.ts to use `import type` syntax for verbatimModuleSyntax compliance
+  - Integrated DroneConnection component into App.tsx header navigation
+- Files changed:
+  - `frontend/src/components/DroneConnection.tsx` (new)
+  - `frontend/src/types/web-serial.d.ts` (new)
+  - `frontend/src/App.tsx` (modified - added DroneConnection import and component)
+  - `frontend/src/lib/droneConnection.ts` (modified - fixed type imports)
+- **Learnings for future iterations:**
+  - Web Serial API requires type declarations: create `web-serial.d.ts` with SerialPort, Serial, Navigator interface extensions
+  - Use `import type { X }` syntax for type-only imports when verbatimModuleSyntax is enabled
+  - DroneConnection uses singleton pattern via `getDroneConnection()` for consistent connection state
+  - Event callbacks are set via `connection.setEventHandlers({...})` - handlers receive typed messages
+  - Connection status visualized with colored dots: green=connected, yellow=connecting, gray=disconnected
+---
+
+## 2026-01-25 - US-036
+- What was implemented:
+  - Added `requestLogList()` method to `DroneConnection` class in `frontend/src/lib/droneConnection.ts`
+  - Function sends LOG_REQUEST_LIST MAVLink message to the connected drone
+  - Collects LOG_ENTRY responses and builds an array of log entries
+  - Each log entry contains: id, size, timeUtc (Unix timestamp in seconds)
+  - Handles timeout (5 seconds) if drone doesn't respond
+  - Returns partial results if some entries were received before timeout
+  - Exports `DroneLogEntry` interface for type-safe log list handling
+  - Logs are sorted by ID descending (most recent first)
+- Files changed:
+  - `frontend/src/lib/droneConnection.ts` (modified - added requestLogList method and DroneLogEntry interface)
+- **Learnings for future iterations:**
+  - MAVLink log list protocol: send LOG_REQUEST_LIST, receive multiple LOG_ENTRY responses
+  - LOG_ENTRY messages contain numLogs field indicating total expected entries
+  - Entries with size=0 are empty slots and should be filtered out
+  - Use Promise pattern with event handler interception for async MAVLink request/response flows
+  - Always restore original event handlers in cleanup to avoid handler leaks
+---
+
+## 2026-01-25 - US-037
+- What was implemented:
+  - Created `frontend/src/components/DroneLogsPanel.tsx` for displaying and selecting drone logs
+  - Panel only appears when drone is connected (checks connection state on render)
+  - Shows log list table with ID, Date, Size columns
+  - Checkbox selection for each log with clickable rows for convenience
+  - Select All / Deselect All buttons in header
+  - Refresh button with spinning animation during fetch
+  - Loading state with spinner while fetching logs from drone
+  - Error state display with error message
+  - Empty state when no logs found on drone
+  - Selection count footer showing number of selected logs
+  - Integrated panel into LogListPage between filter panel and flight log table
+- Files changed:
+  - `frontend/src/components/DroneLogsPanel.tsx` (new)
+  - `frontend/src/pages/LogListPage.tsx` (modified - added DroneLogsPanel import and integration)
+- **Learnings for future iterations:**
+  - Panel component pattern: use singleton `getDroneConnection()` to track state and access connection methods
+  - Auto-fetch logs when connection state changes to 'connected' using useEffect dependency
+  - Format helpers: `formatSize()` for bytes to KB/MB, `formatDate()` for UTC timestamp to YYYY-MM-DD
+  - Selection pattern: use `Set<number>` for selectedIds for O(1) lookup/add/delete operations
+  - Table with max-height and overflow-y-auto for scrollable content with fixed header (sticky top-0)
+---
+
+## 2026-01-25 - US-038
+- What was implemented:
+  - Added `downloadLog()` method to `DroneConnection` class for downloading log data via MAVLink LOG_REQUEST_DATA/LOG_DATA protocol
+  - Exported `DownloadProgress` and `DownloadedLog` interfaces for type-safe progress tracking
+  - Added Download Selected button to DroneLogsPanel header with proper disabled state handling
+  - Implemented progress bar with bytes received/total, percentage, and multi-log counter (e.g., "2 of 5")
+  - Sequential download of multiple selected logs with progress tracking per log
+  - Downloaded logs stored as Blobs in browser memory via `DownloadedLog` interface
+  - Added download error and success notifications in the panel
+- Files changed:
+  - `frontend/src/lib/droneConnection.ts` (modified - added downloadLog method, DownloadProgress/DownloadedLog interfaces)
+  - `frontend/src/components/DroneLogsPanel.tsx` (modified - added download button, progress bar, DownloadState management)
+- **Learnings for future iterations:**
+  - MAVLink log download protocol: send LOG_REQUEST_DATA(id, offset, count), receive LOG_DATA responses with offset+data chunks
+  - Use Map<offset, Uint8Array> to collect chunks, then sort by offset and assemble into Blob
+  - Progress tracking pattern: DownloadState object with isDownloading, currentLogId, currentProgress, completedCount, totalCount
+  - Timeout pattern: reset timeout on each received chunk (10 second timeout), resolve partial or reject on timeout
+  - Event handler interception: save original handler, restore in cleanup to avoid handler leaks
+  - Multi-log download: loop through selected logs sequentially, track completedCount vs totalCount for UI
+---
+
+## 2026-01-25 - US-039
+- What was implemented:
+  - Added Upload buttons to DroneLogsPanel that appear after drone log download completes
+  - Each downloaded log shows an "Upload Log {id}" button with upload icon
+  - Button navigates to /upload with the downloaded Blob passed via React Router navigation state
+  - Modified UploadPage to accept pre-populated file via `useLocation` hook
+  - Converts Blob to File object with generated filename (log_{id}_{date}.ulg)
+  - Added "Downloaded from drone" badge indicator when file came from drone connection
+  - Added `fromDrone` state to track source of file and reset properly on file removal
+  - Metadata extraction proceeds normally after file is populated
+- Files changed:
+  - `frontend/src/components/DroneLogsPanel.tsx` (modified - added handleUploadLog, Upload buttons)
+  - `frontend/src/pages/UploadPage.tsx` (modified - added DroneLogState interface, useLocation hook, fromDrone state, drone badge)
+- **Learnings for future iterations:**
+  - React Router navigation state: use `navigate('/path', { state: { ... } })` to pass data between routes
+  - Access navigation state via `useLocation().state` with type assertion to interface
+  - Convert Blob to File: `new File([blob], filename, { type: 'application/octet-stream' })`
+  - Clear navigation state after processing to prevent re-processing on refresh: `navigate(location.pathname, { replace: true, state: null })`
+  - DroneLogsPanel tracks downloaded logs in downloadState.downloadedLogs array for post-download actions
+---
+
+## 2026-01-26 - US-040
+- What was implemented:
+  - Created `scripts/upload_log.py` Python CLI script for programmatic flight log uploads
+  - Required arguments: `--file` (path to .ulg file), `--pilot`, `--drone-model` (XLT, S1, or CX10)
+  - Optional arguments: `--title` (defaults to filename), `--comment`, `--tags` (comma-separated)
+  - `--api-url` argument defaults to http://localhost:8000
+  - Uploads via multipart form to POST /api/logs endpoint
+  - Prints success message with created log ID on 201 response
+  - Prints error message to stderr and exits with code 1 on failure
+  - Added `requests>=2.31.0` to `backend/requirements.txt`
+- Files changed:
+  - `scripts/upload_log.py` (new)
+  - `backend/requirements.txt` (modified - added requests dependency)
+- **Learnings for future iterations:**
+  - Python CLI pattern: use argparse with `formatter_class=argparse.RawDescriptionHelpFormatter` for docstring in help
+  - For multipart file uploads: open file in `with` block, pass to `files` param as tuple `(filename, file_obj, content_type)`
+  - Use `requests.post(url, data=form_data, files=files)` for multipart form uploads
+  - Error handling: catch `requests.exceptions.ConnectionError` and `Timeout` separately for clearer error messages
+  - Type stubs: install `types-requests` for mypy compatibility when using requests library
+---
+
+## 2026-01-26 - US-041
+- What was implemented:
+  - Configured FastAPI to serve frontend production build from `frontend/dist` at root path
+  - Added `FRONTEND_DIST_DIR` setting to `backend/config.py` pointing to `frontend/dist`
+  - Mounted `/assets` static files directory for Vite build assets (JS, CSS)
+  - Implemented catch-all route `/{full_path:path}` for SPA client-side routing fallback
+  - Route checks if requested file exists in dist folder, otherwise returns `index.html`
+  - Conditional mounting: only mounts frontend if `frontend/dist` directory exists
+  - Created `README.md` with development and production build documentation
+  - Fixed minor TypeScript issues: removed unused variable in DroneLogsPanel, fixed Blob type in droneConnection
+- Files changed:
+  - `backend/config.py` (modified - added FRONTEND_DIST_DIR setting)
+  - `backend/main.py` (modified - added /assets mount and SPA fallback route)
+  - `README.md` (new)
+  - `frontend/src/components/DroneLogsPanel.tsx` (modified - removed unused variable)
+  - `frontend/src/lib/droneConnection.ts` (modified - fixed Blob type for TypeScript strictness)
+- **Learnings for future iterations:**
+  - SPA fallback pattern: catch-all route `/{full_path:path}` must be registered LAST to not override API routes
+  - Check if file exists before returning index.html: `if file_path.is_file(): return FileResponse(file_path)`
+  - Conditional mounting: wrap in `if settings.FRONTEND_DIST_DIR.exists():` to avoid errors in dev-only mode
+  - Vite build outputs assets to `dist/assets/` subfolder with hashed filenames
+  - For production: run `npm run build` in frontend/, then start uvicorn to serve everything
+---
