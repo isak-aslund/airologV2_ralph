@@ -1,13 +1,27 @@
 """Flight Log Manager - FastAPI Backend"""
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from backend.config import settings
+from backend.database import init_db
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan handler for startup/shutdown."""
+    # Startup: Initialize database tables
+    init_db()
+    yield
+    # Shutdown: cleanup if needed
+
 
 app = FastAPI(
     title="Flight Log Manager",
     description="API for managing PX4 .ulg flight test logs",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 
