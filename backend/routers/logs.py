@@ -1,20 +1,126 @@
 """API router for flight log management."""
 
+import math
 import os
 import uuid
+from datetime import datetime
 from pathlib import Path
+from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from backend.config import settings
 from backend.database import get_db
 from backend.models import DroneModel, FlightLog, Tag
-from backend.schemas import FlightLogResponse, FlightLogUpdate
+from backend.schemas import FlightLogResponse, FlightLogUpdate, PaginatedResponse
 from backend.services.ulog_parser import extract_metadata
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
+
+
+@router.get("", response_model=PaginatedResponse[FlightLogResponse])
+async def list_logs(
+    page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
+    per_page: Literal[25, 50, 100] = Query(default=25, description="Items per page"),
+    search: Optional[str] = Query(
+        default=None, description="Search in title, pilot, comment, serial_number"
+    ),
+    drone_model: Optional[str] = Query(
+        default=None, description="Comma-separated drone models (XLT, S1, CX10)"
+    ),
+    pilot: Optional[str] = Query(default=None, description="Exact pilot name match"),
+    tags: Optional[str] = Query(
+        default=None, description="Comma-separated tag names"
+    ),
+    date_from: Optional[datetime] = Query(
+        default=None, description="Filter logs from this date (ISO format)"
+    ),
+    date_to: Optional[datetime] = Query(
+        default=None, description="Filter logs up to this date (ISO format)"
+    ),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    List flight logs with pagination, search, and filtering.
+
+    - page: Page number starting from 1
+    - per_page: 25, 50, or 100 items per page
+    - search: Case-insensitive search in title, pilot, comment, serial_number
+    - drone_model: Comma-separated list of models to filter (e.g., "XLT,S1")
+    - pilot: Exact match for pilot name
+    - tags: Comma-separated tag names to filter by
+    - date_from: ISO date to filter logs from
+    - date_to: ISO date to filter logs up to
+    """
+    query = db.query(FlightLog)
+
+    # Apply search filter (case-insensitive)
+    if search:
+        search_term = f"%{search.lower()}%"
+        query = query.filter(
+            or_(
+                FlightLog.title.ilike(search_term),
+                FlightLog.pilot.ilike(search_term),
+                FlightLog.comment.ilike(search_term),
+                FlightLog.serial_number.ilike(search_term),
+            )
+        )
+
+    # Apply drone_model filter
+    if drone_model:
+        model_names = [m.strip().upper() for m in drone_model.split(",") if m.strip()]
+        valid_models = []
+        for name in model_names:
+            try:
+                valid_models.append(DroneModel(name))
+            except ValueError:
+                pass  # Skip invalid model names
+        if valid_models:
+            query = query.filter(FlightLog.drone_model.in_(valid_models))
+
+    # Apply pilot exact match filter
+    if pilot:
+        query = query.filter(FlightLog.pilot == pilot)
+
+    # Apply tags filter
+    if tags:
+        tag_names = [t.strip().lower() for t in tags.split(",") if t.strip()]
+        if tag_names:
+            # Filter logs that have ALL specified tags
+            for tag_name in tag_names:
+                query = query.filter(
+                    FlightLog.tags.any(Tag.name == tag_name)
+                )
+
+    # Apply date range filters
+    if date_from:
+        query = query.filter(FlightLog.flight_date >= date_from)
+    if date_to:
+        query = query.filter(FlightLog.flight_date <= date_to)
+
+    # Order by flight_date descending
+    query = query.order_by(FlightLog.flight_date.desc())
+
+    # Get total count
+    total = query.count()
+
+    # Calculate pagination
+    total_pages = max(1, math.ceil(total / per_page))
+    offset = (page - 1) * per_page
+
+    # Get paginated results
+    items = query.offset(offset).limit(per_page).all()
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
+    }
 
 
 def get_or_create_tags(db: Session, tag_names: list[str]) -> list[Tag]:
