@@ -11,9 +11,9 @@ function formatHours(hours: number): string {
 function StatsSkeleton() {
   return (
     <div className="bg-white rounded-lg shadow p-4 mb-6 animate-pulse">
-      <div className="flex flex-wrap gap-6 items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap gap-4 sm:gap-6 sm:items-center sm:justify-between">
         {/* Total stats skeleton */}
-        <div className="flex gap-8">
+        <div className="flex flex-col sm:flex-row gap-4 sm:gap-8">
           <div>
             <div className="h-4 w-20 bg-gray-200 rounded mb-2" />
             <div className="h-8 w-16 bg-gray-200 rounded" />
@@ -24,7 +24,7 @@ function StatsSkeleton() {
           </div>
         </div>
         {/* Drone models skeleton */}
-        <div className="flex gap-6">
+        <div className="flex flex-wrap gap-4 sm:gap-6">
           {[1, 2, 3].map((i) => (
             <div key={i} className="flex items-center gap-2">
               <div className="w-10 h-10 bg-gray-200 rounded" />
@@ -80,9 +80,9 @@ export default function StatsHeader() {
 
   return (
     <div className="bg-white rounded-lg shadow p-4 mb-6">
-      <div className="flex flex-wrap gap-6 items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap gap-4 sm:gap-6 sm:items-center sm:justify-between">
         {/* Total stats */}
-        <div className="flex gap-8">
+        <div className="flex flex-col sm:flex-row gap-4 sm:gap-8">
           <div>
             <p className="text-sm text-gray-500 font-medium">Total Flights</p>
             <p className="text-2xl font-bold text-gray-900">{stats.total_flights}</p>
@@ -93,7 +93,7 @@ export default function StatsHeader() {
           </div>
         </div>
         {/* Hours by model with drone thumbnails */}
-        <div className="flex gap-6">
+        <div className="flex flex-wrap gap-4 sm:gap-6">
           {DRONE_MODELS.map((model) => (
             <div key={model} className="flex items-center gap-2">
               <img

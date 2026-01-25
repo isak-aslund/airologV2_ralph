@@ -19,7 +19,13 @@ interface FilterPanelProps {
 }
 
 export default function FilterPanel({ filters, onFilterChange }: FilterPanelProps) {
-  const [isExpanded, setIsExpanded] = useState(false)
+  // Start collapsed on small screens (< 768px), expanded on larger screens
+  const [isExpanded, setIsExpanded] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 768
+    }
+    return false
+  })
   const [pilots, setPilots] = useState<string[]>([])
   const [pilotsLoading, setPilotsLoading] = useState(false)
   const [allTags, setAllTags] = useState<Tag[]>([])

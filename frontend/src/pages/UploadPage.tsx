@@ -273,8 +273,8 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="container mx-auto p-4 max-w-3xl">
-      <h1 className="text-2xl font-bold mb-6">Upload Flight Log</h1>
+    <div className="container mx-auto px-3 sm:px-4 py-4 max-w-3xl">
+      <h1 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Upload Flight Log</h1>
 
       {/* File Selection Area */}
       <div
