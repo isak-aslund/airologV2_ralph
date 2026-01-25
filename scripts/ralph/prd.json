@@ -1,0 +1,693 @@
+{
+  "project": "Flight Log Manager",
+  "branchName": "ralph/flight-log-manager",
+  "description": "A modern web application for managing PX4 .ulg flight test logs with rich metadata, integrating with flight_review for visualization",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Initialize FastAPI backend project structure",
+      "description": "As a developer, I need the FastAPI project scaffolding so that backend development can begin.",
+      "acceptanceCriteria": [
+        "Create backend/ directory with __init__.py",
+        "Create backend/main.py with FastAPI app instance",
+        "Create backend/requirements.txt with fastapi, uvicorn, sqlalchemy, pyulog, python-multipart",
+        "Create backend/config.py with settings (database path, upload directory, etc.)",
+        "App runs with uvicorn and returns 200 on GET /health",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Create SQLite database schema and models",
+      "description": "As a developer, I need database models so that flight logs can be persisted.",
+      "acceptanceCriteria": [
+        "Create backend/database.py with SQLAlchemy engine and session setup for SQLite",
+        "Create backend/models.py with FlightLog model: id (UUID), title, pilot, serial_number, drone_model (enum: XLT/S1/CX10), duration_seconds, file_path, comment, takeoff_lat, takeoff_lon, flight_date, created_at, updated_at",
+        "Create Tag model: id, name (unique, lowercase)",
+        "Create flight_log_tags association table",
+        "Database auto-creates tables on startup if not exists",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Create Pydantic schemas for API validation",
+      "description": "As a developer, I need request/response schemas for API validation.",
+      "acceptanceCriteria": [
+        "Create backend/schemas.py with FlightLogCreate, FlightLogUpdate, FlightLogResponse schemas",
+        "Create TagCreate, TagResponse schemas",
+        "Create PaginatedResponse schema with items, total, page, per_page, total_pages",
+        "Create StatsResponse schema with total_flights, total_hours, hours_by_model dict",
+        "All schemas have proper type hints",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Implement ULog metadata extraction service",
+      "description": "As a developer, I need a service to extract metadata from .ulg files.",
+      "acceptanceCriteria": [
+        "Create backend/services/ulog_parser.py",
+        "Function extract_metadata(file_path) returns dict with: duration_seconds, flight_date, serial_number (from AIROLIT_SERIAL param or None), takeoff_lat, takeoff_lon",
+        "Duration calculated from first to last timestamp in file",
+        "GPS coordinates extracted from first valid vehicle_gps_position message",
+        "Function get_parameters(file_path) returns dict of all parameters",
+        "Handles missing data gracefully (returns None for unavailable fields)",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Implement flight log CRUD API endpoints",
+      "description": "As a developer, I need REST endpoints for managing flight logs.",
+      "acceptanceCriteria": [
+        "Create backend/routers/logs.py with APIRouter",
+        "POST /api/logs - accepts multipart form (file + metadata), saves file to data/logs/{uuid}.ulg, extracts metadata, creates DB record, returns FlightLogResponse",
+        "GET /api/logs/{id} - returns single log with tags",
+        "PUT /api/logs/{id} - updates editable fields (title, pilot, drone_model, comment, tags)",
+        "DELETE /api/logs/{id} - deletes DB record and .ulg file",
+        "GET /api/logs/{id}/download - returns file as attachment",
+        "All endpoints return proper HTTP status codes (201, 200, 404, etc.)",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Implement flight log list with pagination and filters",
+      "description": "As a developer, I need the list endpoint with search, filter, and pagination.",
+      "acceptanceCriteria": [
+        "GET /api/logs accepts query params: page (default 1), per_page (25|50|100, default 25)",
+        "Accepts search param that searches title, pilot, comment, serial_number (case-insensitive)",
+        "Accepts drone_model param (comma-separated for multiple)",
+        "Accepts pilot param for exact match",
+        "Accepts tags param (comma-separated tag names)",
+        "Accepts date_from and date_to params (ISO format)",
+        "Returns PaginatedResponse with total count and calculated total_pages",
+        "Results ordered by flight_date descending",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Implement parameters and stats endpoints",
+      "description": "As a developer, I need endpoints for parameters and statistics.",
+      "acceptanceCriteria": [
+        "GET /api/logs/{id}/parameters - returns dict of all parameters from .ulg file",
+        "GET /api/stats - returns total_flights, total_hours (sum of all duration_seconds / 3600), hours_by_model (dict with XLT, S1, CX10 keys)",
+        "GET /api/pilots - returns list of unique pilot names for autocomplete",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Implement tag management API",
+      "description": "As a developer, I need endpoints for managing tags.",
+      "acceptanceCriteria": [
+        "Create backend/routers/tags.py with APIRouter",
+        "GET /api/tags - returns all tags, accepts search param for filtering",
+        "POST /api/tags - creates new tag (lowercase), returns existing if duplicate",
+        "Tags automatically created when used in log create/update if they don't exist",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Configure CORS and static file serving",
+      "description": "As a developer, I need CORS and static files configured for frontend integration.",
+      "acceptanceCriteria": [
+        "CORS middleware allows localhost:5173 (Vite dev server) and localhost:8000",
+        "Static files served from /img path pointing to project img/ directory",
+        "Create data/logs/ directory on startup if not exists",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Initialize React frontend project",
+      "description": "As a developer, I need the React project scaffolding.",
+      "acceptanceCriteria": [
+        "Create frontend/ directory with Vite + React + TypeScript",
+        "Configure TailwindCSS with reasonable defaults",
+        "Configure React Router with routes: / (log list), /upload (upload form)",
+        "Create src/api/client.ts with axios instance pointing to http://localhost:8000/api",
+        "Project builds without errors",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Create TypeScript types for API",
+      "description": "As a developer, I need TypeScript types matching the API schemas.",
+      "acceptanceCriteria": [
+        "Create frontend/src/types/index.ts",
+        "Define FlightLog type with all fields including tags array",
+        "Define Tag type with id and name",
+        "Define PaginatedResponse<T> generic type",
+        "Define Stats type with total_flights, total_hours, hours_by_model",
+        "Define DroneModel enum/union type: 'XLT' | 'S1' | 'CX10'",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Create API service functions",
+      "description": "As a developer, I need functions to call the backend API.",
+      "acceptanceCriteria": [
+        "Create frontend/src/api/logs.ts with functions: getLogs(params), getLog(id), createLog(formData), updateLog(id, data), deleteLog(id), downloadLog(id), getParameters(id)",
+        "Create frontend/src/api/tags.ts with functions: getTags(search?), createTag(name)",
+        "Create frontend/src/api/stats.ts with function: getStats()",
+        "Create frontend/src/api/pilots.ts with function: getPilots()",
+        "All functions properly typed with request/response types",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Create stats header component",
+      "description": "As a user, I want to see flight statistics at the top of the page.",
+      "acceptanceCriteria": [
+        "Create frontend/src/components/StatsHeader.tsx",
+        "Displays: Total Flights count, Total Flight Hours (formatted as X.X hrs)",
+        "Displays hours by model: XLT, S1, CX10 with drone thumbnails",
+        "Fetches stats from /api/stats on mount",
+        "Shows loading skeleton while fetching",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Create flight log table component",
+      "description": "As a user, I want to see flight logs in a table.",
+      "acceptanceCriteria": [
+        "Create frontend/src/components/FlightLogTable.tsx",
+        "Table columns: Thumbnail (40x40), Model, Serial, Pilot, Title, Duration (HH:MM:SS), Tags, Comment, Date, Actions",
+        "Drone thumbnail loaded from /img/{model}.png",
+        "Comment truncated to 50 chars with '...' if longer",
+        "Tags displayed as colored badges",
+        "Date formatted as YYYY-MM-DD",
+        "Alternating row background colors",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Add tooltip for truncated comments",
+      "description": "As a user, I want to see the full comment on hover.",
+      "acceptanceCriteria": [
+        "When comment is truncated, hovering shows tooltip with full text",
+        "Tooltip styled with dark background and light text",
+        "Tooltip appears after brief delay (200ms)",
+        "Tooltip disappears when mouse leaves",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Add action buttons to table rows",
+      "description": "As a user, I want action buttons for each log row.",
+      "acceptanceCriteria": [
+        "Actions column has icon buttons: Edit (pencil), Delete (trash), Download (download arrow), Flight Review (external link), Parameters (list icon)",
+        "Flight Review button opens http://10.0.0.100:5006/plot_app?log={filename} in new tab",
+        "Download button triggers file download",
+        "Buttons have hover states and tooltips",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Create pagination component",
+      "description": "As a user, I want pagination controls to navigate through logs.",
+      "acceptanceCriteria": [
+        "Create frontend/src/components/Pagination.tsx",
+        "Shows Previous and Next buttons (disabled when at bounds)",
+        "Shows page numbers with current page highlighted",
+        "Dropdown to select per_page: 25, 50, 100",
+        "Displays 'Page X of Y' text",
+        "Calls onPageChange and onPerPageChange callbacks",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Create search bar component",
+      "description": "As a user, I want a search bar to find logs.",
+      "acceptanceCriteria": [
+        "Create frontend/src/components/SearchBar.tsx",
+        "Text input with search icon",
+        "Triggers search on Enter key press",
+        "Triggers search after 300ms debounce on typing",
+        "Clear button (X) appears when text entered",
+        "Clear button resets search",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Create filter panel component",
+      "description": "As a user, I want filters to narrow down logs.",
+      "acceptanceCriteria": [
+        "Create frontend/src/components/FilterPanel.tsx",
+        "Collapsible panel (toggle button to show/hide)",
+        "Date range inputs: From date, To date (HTML date inputs)",
+        "Drone model checkboxes: XLT, S1, CX10",
+        "Pilot dropdown populated from /api/pilots",
+        "Clear All Filters button",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Add tag filter to filter panel",
+      "description": "As a user, I want to filter by tags.",
+      "acceptanceCriteria": [
+        "Tag filter in FilterPanel with multi-select dropdown",
+        "Dropdown shows all tags from /api/tags",
+        "Search input in dropdown filters tag list",
+        "Selected tags shown as removable chips below dropdown",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Show active filters as chips",
+      "description": "As a user, I want to see which filters are active.",
+      "acceptanceCriteria": [
+        "Active filters displayed as chips below search bar",
+        "Each chip shows filter type and value (e.g., 'Model: XLT', 'Pilot: John')",
+        "Clicking X on chip removes that filter",
+        "Date range shown as single chip 'Date: YYYY-MM-DD to YYYY-MM-DD'",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 21,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Create main log list page with state management",
+      "description": "As a user, I want the main page to combine all components.",
+      "acceptanceCriteria": [
+        "Create frontend/src/pages/LogListPage.tsx",
+        "Integrates StatsHeader, SearchBar, FilterPanel, FlightLogTable, Pagination",
+        "Manages state for: page, perPage, search, filters (drone_model, pilot, tags, date_from, date_to)",
+        "Fetches logs when any state changes",
+        "Shows loading state while fetching",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 22,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Persist filter state in URL",
+      "description": "As a user, I want filters to persist in the URL.",
+      "acceptanceCriteria": [
+        "All filter state synced to URL query params",
+        "Page loads with filters from URL if present",
+        "Browser back/forward navigates filter history",
+        "Sharing URL preserves filter state",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Create delete confirmation modal",
+      "description": "As a user, I want confirmation before deleting a log.",
+      "acceptanceCriteria": [
+        "Create frontend/src/components/DeleteConfirmModal.tsx",
+        "Modal shows log title and warning message",
+        "Cancel button closes modal",
+        "Delete button calls API and closes modal on success",
+        "Shows error message if delete fails",
+        "Table refreshes after successful delete",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Create parameter viewer modal",
+      "description": "As a user, I want to view flight parameters.",
+      "acceptanceCriteria": [
+        "Create frontend/src/components/ParameterModal.tsx",
+        "Modal fetches parameters from /api/logs/{id}/parameters",
+        "Shows loading spinner while fetching",
+        "Displays parameters in scrollable table: Name, Value columns",
+        "Search input filters parameters by name",
+        "Close button dismisses modal",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Create tag input component",
+      "description": "As a user, I want to select and create tags.",
+      "acceptanceCriteria": [
+        "Create frontend/src/components/TagInput.tsx",
+        "Text input with dropdown showing matching tags",
+        "Fetches tags from /api/tags with search param as user types",
+        "Clicking tag adds it to selection",
+        "Option to create new tag if no match (shows 'Create: tagname')",
+        "Selected tags shown as removable chips",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-027",
+      "title": "Create upload page with file selection",
+      "description": "As a user, I want to upload a .ulg file.",
+      "acceptanceCriteria": [
+        "Create frontend/src/pages/UploadPage.tsx",
+        "File input accepts only .ulg files",
+        "Drag-and-drop zone for file selection",
+        "On file select, shows file name and size",
+        "Upload button in header links to this page",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-028",
+      "title": "Add metadata extraction to upload page",
+      "description": "As a user, I want metadata auto-extracted from the file.",
+      "acceptanceCriteria": [
+        "After file selection, sends file to backend for metadata extraction",
+        "Backend endpoint POST /api/extract-metadata returns extracted fields",
+        "Shows loading state during extraction",
+        "Pre-populates form with: duration, flight_date, serial_number, GPS coordinates",
+        "Shows extraction results (which fields were found)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-029",
+      "title": "Create upload form fields",
+      "description": "As a user, I want to enter metadata for the upload.",
+      "acceptanceCriteria": [
+        "Form fields: Title (required text), Pilot (required text with autocomplete from /api/pilots), Drone Model (required dropdown: XLT/S1/CX10), Comment (optional textarea), Tags (TagInput component)",
+        "Pre-populated fields from extraction are editable",
+        "Read-only display of: Duration, Flight Date, GPS coordinates",
+        "Form validation with error messages",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 29,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-030",
+      "title": "Implement upload form submission",
+      "description": "As a user, I want to submit the upload form.",
+      "acceptanceCriteria": [
+        "Submit button creates FormData with file and all metadata",
+        "Shows loading state during upload",
+        "On success, shows success message and redirects to log list",
+        "On error, shows error message without losing form data",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 30,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-031",
+      "title": "Create edit log modal",
+      "description": "As a user, I want to edit log metadata.",
+      "acceptanceCriteria": [
+        "Create frontend/src/components/EditLogModal.tsx",
+        "Modal pre-filled with current log values",
+        "Editable fields: Title, Pilot (with autocomplete), Drone Model, Comment, Tags",
+        "Read-only display: Duration, Flight Date, Serial Number, GPS",
+        "Save button calls PUT /api/logs/{id}",
+        "Cancel button closes without saving",
+        "Table refreshes after successful save",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 31,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-032",
+      "title": "Add responsive layout for tablet/desktop",
+      "description": "As a user, I want the app to work on different screen sizes.",
+      "acceptanceCriteria": [
+        "Table horizontally scrollable on screens < 1024px",
+        "Filter panel collapses by default on screens < 768px",
+        "Stats header stacks vertically on small screens",
+        "Upload form fields stack vertically on small screens",
+        "Minimum supported width: 320px",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 32,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-033",
+      "title": "Create MAVLink message parser in JavaScript",
+      "description": "As a developer, I need MAVLink parsing for Web Serial communication.",
+      "acceptanceCriteria": [
+        "Create frontend/src/lib/mavlink.ts",
+        "Function to parse MAVLink v2 messages from byte stream",
+        "Function to create MAVLink heartbeat message",
+        "Function to create LOG_REQUEST_LIST message",
+        "Function to create LOG_REQUEST_DATA message",
+        "Function to parse LOG_ENTRY response",
+        "Function to parse LOG_DATA response",
+        "Typecheck passes"
+      ],
+      "priority": 33,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-034",
+      "title": "Implement Web Serial connection",
+      "description": "As a user, I want to connect to my drone via USB.",
+      "acceptanceCriteria": [
+        "Create frontend/src/lib/droneConnection.ts",
+        "Function to request serial port via Web Serial API",
+        "Connects at 115200 baud",
+        "Sends periodic heartbeat to maintain connection",
+        "Receives and parses incoming MAVLink messages",
+        "Function to disconnect and close port",
+        "Typecheck passes"
+      ],
+      "priority": 34,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-035",
+      "title": "Create drone connection UI",
+      "description": "As a user, I want a button to connect to my drone.",
+      "acceptanceCriteria": [
+        "Create frontend/src/components/DroneConnection.tsx",
+        "Connect Drone button in header (only visible if Web Serial supported)",
+        "Shows connection status: disconnected/connecting/connected",
+        "Displays drone serial number when connected",
+        "Disconnect button when connected",
+        "Error message if connection fails",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 35,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-036",
+      "title": "Implement drone log list fetching",
+      "description": "As a user, I want to see logs on my connected drone.",
+      "acceptanceCriteria": [
+        "Function to request log list via LOG_REQUEST_LIST message",
+        "Parse LOG_ENTRY responses to build log list",
+        "Each log entry has: id, size, time_utc",
+        "Handles timeout if drone doesn't respond",
+        "Typecheck passes"
+      ],
+      "priority": 36,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-037",
+      "title": "Create drone logs panel UI",
+      "description": "As a user, I want to see and select drone logs.",
+      "acceptanceCriteria": [
+        "Create frontend/src/components/DroneLogsPanel.tsx",
+        "Panel appears when drone connected",
+        "Shows log list with: ID, Date, Size columns",
+        "Checkbox selection for each log",
+        "Select All / Deselect All buttons",
+        "Refresh button to re-fetch log list",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 37,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-038",
+      "title": "Implement drone log download",
+      "description": "As a user, I want to download selected logs from the drone.",
+      "acceptanceCriteria": [
+        "Download Selected button triggers LOG_REQUEST_DATA for each selected log",
+        "Receives LOG_DATA messages and assembles into complete file",
+        "Progress bar showing download progress (bytes received / total)",
+        "Downloaded file stored as Blob in browser memory",
+        "Typecheck passes"
+      ],
+      "priority": 38,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-039",
+      "title": "Connect drone download to upload form",
+      "description": "As a user, I want to upload downloaded drone logs.",
+      "acceptanceCriteria": [
+        "After drone log download completes, Upload button appears",
+        "Clicking Upload opens upload page with file pre-populated",
+        "File passed as Blob to upload form",
+        "Upload form proceeds normally with metadata extraction",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 39,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-040",
+      "title": "Create Python upload script",
+      "description": "As a developer, I need a Python script for programmatic uploads.",
+      "acceptanceCriteria": [
+        "Create scripts/upload_log.py",
+        "Accepts arguments: --file (required), --title, --pilot (required), --drone-model (required), --comment, --tags",
+        "Accepts --api-url (defaults to http://localhost:8000)",
+        "Uploads via multipart form to POST /api/logs",
+        "Prints success message with created log ID",
+        "Prints error message and exits with code 1 on failure",
+        "Typecheck passes"
+      ],
+      "priority": 40,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-041",
+      "title": "Serve frontend build from FastAPI",
+      "description": "As a developer, I need FastAPI to serve the production frontend.",
+      "acceptanceCriteria": [
+        "FastAPI serves static files from frontend/dist at root path",
+        "Fallback to index.html for client-side routing",
+        "API routes still accessible at /api prefix",
+        "Production build command documented in README",
+        "Typecheck passes"
+      ],
+      "priority": 41,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
