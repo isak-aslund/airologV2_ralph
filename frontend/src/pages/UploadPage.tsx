@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { createLog, extractMetadata } from '../api/logs'
 import { getPilots } from '../api/pilots'
 import TagInput from '../components/TagInput'
@@ -21,9 +21,21 @@ interface FormErrors {
   drone_model?: string
 }
 
+// Navigation state interface for receiving drone log from DroneLogsPanel
+interface DroneLogState {
+  droneLog?: {
+    blob: Blob
+    filename: string
+    logId: number
+    timeUtc: number
+  }
+}
+
 export default function UploadPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [fromDrone, setFromDrone] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const [isExtracting, setIsExtracting] = useState(false)
   const [extractionError, setExtractionError] = useState<string | null>(null)
@@ -83,6 +95,22 @@ export default function UploadPage() {
       .then(setPilots)
       .catch((err) => console.error('Error fetching pilots:', err))
   }, [])
+
+  // Handle pre-populated file from drone download (via navigation state)
+  useEffect(() => {
+    const state = location.state as DroneLogState | null
+    if (state?.droneLog) {
+      const { blob, filename } = state.droneLog
+      // Convert Blob to File object
+      const file = new File([blob], filename, { type: 'application/octet-stream' })
+      setSelectedFile(file)
+      setFromDrone(true)
+
+      // Clear the navigation state to prevent re-processing on refresh
+      // Use replace to avoid adding to history
+      navigate(location.pathname, { replace: true, state: null })
+    }
+  }, [location.state, location.pathname, navigate])
 
   // Handle click outside for pilot suggestions
   useEffect(() => {
@@ -248,6 +276,7 @@ export default function UploadPage() {
     setSelectedFile(null)
     setMetadata(null)
     setExtractionError(null)
+    setFromDrone(false)
     setFormData({
       title: '',
       pilot: '',
@@ -318,6 +347,14 @@ export default function UploadPage() {
               </svg>
             </div>
             <div>
+              {fromDrone && (
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mb-2">
+                  <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                  </svg>
+                  Downloaded from drone
+                </span>
+              )}
               <p className="text-lg font-semibold text-gray-900">{selectedFile.name}</p>
               <p className="text-sm text-gray-500">{formatFileSize(selectedFile.size)}</p>
             </div>
