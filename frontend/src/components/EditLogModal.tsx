@@ -15,7 +15,7 @@ interface EditLogModalProps {
 interface FormData {
   title: string
   pilot: string
-  drone_model: DroneModel
+  drone_model: string  // Can be known model or custom value
   comment: string
   tags: string[]
 }
@@ -275,6 +275,12 @@ export default function EditLogModal({ log, onClose, onSaved }: EditLogModalProp
                       {model}
                     </option>
                   ))}
+                  {/* Show custom model if not in known models list */}
+                  {formData.drone_model && !DRONE_MODELS.includes(formData.drone_model as DroneModel) && (
+                    <option value={formData.drone_model}>
+                      {formData.drone_model}
+                    </option>
+                  )}
                 </select>
               </div>
 

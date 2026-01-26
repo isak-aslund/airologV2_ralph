@@ -10,16 +10,15 @@ import DeleteConfirmModal from '../components/DeleteConfirmModal'
 import ParameterModal from '../components/ParameterModal'
 import EditLogModal from '../components/EditLogModal'
 import { getLogs, downloadLog, uploadToFlightReview } from '../api/logs'
-import type { FlightLog, PaginatedResponse, DroneModel } from '../types'
+import type { FlightLog, PaginatedResponse } from '../types'
 
-const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
 const VALID_PER_PAGE = [25, 50, 100] as const
 
 // Parse URL search params into filter state
 function parseFiltersFromParams(searchParams: URLSearchParams): FilterState {
   const droneModelParam = searchParams.get('drone_model')
   const droneModels = droneModelParam
-    ? droneModelParam.split(',').filter((m): m is DroneModel => DRONE_MODELS.includes(m as DroneModel))
+    ? droneModelParam.split(',').filter(Boolean)
     : []
 
   const tagsParam = searchParams.get('tags')
@@ -134,7 +133,7 @@ export default function LogListPage() {
     }, true)
   }
 
-  const handleRemoveFilter = (type: keyof FilterState, value?: string | DroneModel) => {
+  const handleRemoveFilter = (type: keyof FilterState, value?: string) => {
     const newFilters = { ...filters }
 
     switch (type) {
