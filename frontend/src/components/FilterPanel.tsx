@@ -1,9 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { getPilots } from '../api/pilots'
+import { getPilots, getDroneModels } from '../api/pilots'
 import { getTags } from '../api/tags'
-import type { DroneModel, Tag } from '../types'
-
-const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
+import type { Tag } from '../types'
 
 // Available flight modes (matching backend FLIGHT_MODES)
 const FLIGHT_MODES = [
@@ -15,7 +13,7 @@ const FLIGHT_MODES = [
 export interface FilterState {
   dateFrom: string
   dateTo: string
-  droneModels: DroneModel[]
+  droneModels: string[]  // Can be any drone model (known or custom)
   pilot: string
   tags: string[]
   flightModes: string[]
@@ -36,6 +34,8 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
   })
   const [pilots, setPilots] = useState<string[]>([])
   const [pilotsLoading, setPilotsLoading] = useState(false)
+  const [droneModels, setDroneModels] = useState<string[]>([])
+  const [droneModelsLoading, setDroneModelsLoading] = useState(false)
   const [allTags, setAllTags] = useState<Tag[]>([])
   const [tagsLoading, setTagsLoading] = useState(false)
   const [tagDropdownOpen, setTagDropdownOpen] = useState(false)
@@ -59,6 +59,22 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
       }
     }
     fetchPilots()
+  }, [])
+
+  // Fetch drone models list on mount
+  useEffect(() => {
+    async function fetchDroneModels() {
+      try {
+        setDroneModelsLoading(true)
+        const data = await getDroneModels()
+        setDroneModels(data)
+      } catch (err) {
+        console.error('Error fetching drone models:', err)
+      } finally {
+        setDroneModelsLoading(false)
+      }
+    }
+    fetchDroneModels()
   }, [])
 
   // Fetch tags list on mount
@@ -105,13 +121,11 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     })
   }
 
-  function handleDroneModelChange(model: DroneModel, checked: boolean) {
-    const newModels = checked
-      ? [...filters.droneModels, model]
-      : filters.droneModels.filter((m) => m !== model)
+  function handleDroneModelChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const model = e.target.value
     onFilterChange({
       ...filters,
-      droneModels: newModels,
+      droneModels: model ? [model] : [],
     })
   }
 
@@ -261,22 +275,25 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
               />
             </div>
 
-            {/* Drone Model checkboxes */}
+            {/* Drone Model dropdown */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Drone Model</label>
-              <div className="flex flex-wrap gap-3">
-                {DRONE_MODELS.map((model) => (
-                  <label key={model} className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={filters.droneModels.includes(model)}
-                      onChange={(e) => handleDroneModelChange(model, e.target.checked)}
-                      className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                    />
-                    <span className="text-sm text-gray-700">{model}</span>
-                  </label>
+              <label htmlFor="drone-model" className="block text-sm font-medium text-gray-700 mb-1">
+                Drone Model
+              </label>
+              <select
+                id="drone-model"
+                value={filters.droneModels[0] || ''}
+                onChange={handleDroneModelChange}
+                disabled={droneModelsLoading}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+              >
+                <option value="">All models</option>
+                {droneModels.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
                 ))}
-              </div>
+              </select>
             </div>
 
             {/* Pilot dropdown */}

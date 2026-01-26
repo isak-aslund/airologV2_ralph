@@ -1,13 +1,12 @@
 import type { FilterState } from './FilterPanel'
-import type { DroneModel } from '../types'
 
 interface ActiveFilterChipsProps {
   filters: FilterState
-  onRemoveFilter: (type: keyof FilterState, value?: string | DroneModel) => void
+  onRemoveFilter: (type: keyof FilterState, value?: string) => void
 }
 
 export default function ActiveFilterChips({ filters, onRemoveFilter }: ActiveFilterChipsProps) {
-  const chips: { label: string; type: keyof FilterState; value?: string | DroneModel }[] = []
+  const chips: { label: string; type: keyof FilterState; value?: string }[] = []
 
   // Date range as single chip
   if (filters.dateFrom && filters.dateTo) {

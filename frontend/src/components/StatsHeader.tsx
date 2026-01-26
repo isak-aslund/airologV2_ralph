@@ -94,17 +94,26 @@ export default function StatsHeader() {
         </div>
         {/* Hours by model with drone thumbnails */}
         <div className="flex flex-wrap gap-4 sm:gap-6">
-          {DRONE_MODELS.map((model) => (
+          {Object.entries(stats.hours_by_model).map(([model, hours]) => (
             <div key={model} className="flex items-center gap-2">
-              <img
-                src={`/img/${model}.png`}
-                alt={`${model} drone`}
-                className="w-10 h-10 object-contain"
-              />
+              {/* Show image for known models, icon for custom models */}
+              {DRONE_MODELS.includes(model as DroneModel) ? (
+                <img
+                  src={`/img/${model}.png`}
+                  alt={`${model} drone`}
+                  className="w-10 h-10 object-contain"
+                />
+              ) : (
+                <div className="w-10 h-10 bg-gray-100 rounded flex items-center justify-center">
+                  <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </div>
+              )}
               <div>
                 <p className="text-xs text-gray-500 font-medium">{model}</p>
                 <p className="text-lg font-semibold text-gray-900">
-                  {formatHours(stats.hours_by_model[model])} hrs
+                  {formatHours(hours)} hrs
                 </p>
               </div>
             </div>

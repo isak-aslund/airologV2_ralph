@@ -7,12 +7,13 @@ import DroneLogsPanel from '../components/DroneLogsPanel'
 import type { DownloadedLog } from '../lib/droneConnection'
 import type { DroneModel, ExtractedMetadata } from '../types'
 
+// Known drone models for dropdowns
 const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
 
 interface FormData {
   title: string
   pilot: string
-  drone_model: DroneModel | ''
+  drone_model: string  // Can be known model or custom value (e.g., "4001")
   comment: string
   tags: string[]
 }
@@ -27,7 +28,7 @@ interface FormErrors {
 interface FileOverride {
   title: string  // Pre-populated from filename (without .ulg)
   pilot: string  // Optional override for pilot
-  drone_model: DroneModel | ''  // Optional override for drone model
+  drone_model: string  // Optional override for drone model (can be custom)
   comment: string  // Optional comment
   tags: string[]  // Optional tags
 }
@@ -314,8 +315,8 @@ export default function UploadPage() {
     // For single file, use the metadata state
     if (selectedFiles.length === 1 && metadata?.drone_model) {
       const model = metadata.drone_model
-      // Only set if it's a valid known model (not "unknown")
-      if (model === 'S1' || model === 'CX10' || model === 'XLT') {
+      // Set any valid model (known models or custom values like "4001")
+      if (model && model !== 'unknown') {
         setFormData(prev => ({ ...prev, drone_model: model }))
       }
       return
@@ -326,7 +327,7 @@ export default function UploadPage() {
       const firstFileMetadata = fileMetadataStates.get(selectedFiles[0]?.name)?.metadata
       if (firstFileMetadata?.drone_model) {
         const model = firstFileMetadata.drone_model
-        if (model === 'S1' || model === 'CX10' || model === 'XLT') {
+        if (model && model !== 'unknown') {
           setFormData(prev => ({ ...prev, drone_model: model }))
         }
       }
@@ -877,11 +878,32 @@ export default function UploadPage() {
                     {model}
                   </option>
                 ))}
+                {/* Show custom model if not in known models list */}
+                {formData.drone_model && !DRONE_MODELS.includes(formData.drone_model as DroneModel) && (
+                  <option value={formData.drone_model}>
+                    {formData.drone_model}
+                  </option>
+                )}
               </select>
               {formErrors.drone_model && (
                 <p className="mt-1 text-sm text-red-600">{formErrors.drone_model}</p>
               )}
             </div>
+          </div>
+
+          {/* Comment */}
+          <div className="mt-4">
+            <label htmlFor="default-comment" className="block text-sm font-medium text-gray-700 mb-1">
+              Comment
+            </label>
+            <textarea
+              id="default-comment"
+              value={formData.comment}
+              onChange={(e) => handleFormChange('comment', e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Optional comment for all logs"
+              rows={3}
+            />
           </div>
         </div>
       )}
@@ -1234,6 +1256,12 @@ export default function UploadPage() {
                                     {model}
                                   </option>
                                 ))}
+                                {/* Show custom model from default if not in known models */}
+                                {formData.drone_model && !DRONE_MODELS.includes(formData.drone_model as DroneModel) && (
+                                  <option value={formData.drone_model}>
+                                    {formData.drone_model}
+                                  </option>
+                                )}
                               </select>
                             </div>
                           </div>

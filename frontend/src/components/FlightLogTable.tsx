@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import type { FlightLog } from '../types'
+import type { FlightLog, DroneModel } from '../types'
+
+// Known drone models that have thumbnail images
+const KNOWN_DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
 
 // Tooltip component for truncated comments - uses portal to avoid overflow clipping
 interface TooltipProps {
@@ -263,13 +266,17 @@ export default function FlightLogTable({
         <tbody className="bg-white divide-y divide-gray-200">
           {logs.map((log, index) => (
             <tr key={log.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-              {/* Thumbnail */}
+              {/* Thumbnail - only show for known drone models */}
               <td className="px-3 py-2 whitespace-nowrap">
-                <img
-                  src={`/img/${log.drone_model}.png`}
-                  alt={`${log.drone_model} drone`}
-                  className="w-10 h-10 object-contain"
-                />
+                {KNOWN_DRONE_MODELS.includes(log.drone_model as DroneModel) ? (
+                  <img
+                    src={`/img/${log.drone_model}.png`}
+                    alt={`${log.drone_model} drone`}
+                    className="w-10 h-10 object-contain"
+                  />
+                ) : (
+                  <div className="w-10 h-10" />
+                )}
               </td>
               {/* Model */}
               <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">

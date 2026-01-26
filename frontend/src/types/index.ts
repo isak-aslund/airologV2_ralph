@@ -2,7 +2,7 @@
  * TypeScript types matching the backend API schemas.
  */
 
-// Drone model enum/union type
+// Known drone models (for UI dropdowns)
 export type DroneModel = 'XLT' | 'S1' | 'CX10';
 
 // Tag type
@@ -17,7 +17,7 @@ export interface FlightLog {
   title: string;
   pilot: string;
   serial_number: string | null;
-  drone_model: DroneModel;
+  drone_model: string;
   duration_seconds: number | null;
   file_path: string;
   comment: string | null;
@@ -44,14 +44,14 @@ export interface PaginatedResponse<T> {
 export interface Stats {
   total_flights: number;
   total_hours: number;
-  hours_by_model: Record<DroneModel, number>;
+  hours_by_model: Record<string, number>;
 }
 
 // Request types for creating/updating flight logs
 export interface FlightLogCreate {
   title: string;
   pilot: string;
-  drone_model: DroneModel;
+  drone_model: string;
   serial_number?: string | null;
   duration_seconds?: number | null;
   comment?: string | null;
@@ -64,7 +64,7 @@ export interface FlightLogCreate {
 export interface FlightLogUpdate {
   title?: string;
   pilot?: string;
-  drone_model?: DroneModel;
+  drone_model?: string;
   comment?: string | null;
   tags?: string[];
 }
