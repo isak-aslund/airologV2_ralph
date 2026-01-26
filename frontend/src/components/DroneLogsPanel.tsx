@@ -17,6 +17,7 @@ interface DownloadState {
   totalCount: number
   downloadedLogs: DownloadedLog[]
   error: string | null
+  abortController: AbortController | null
 }
 
 // Format bytes to human readable size
@@ -30,14 +31,23 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-// Format UTC timestamp to readable date
+// Format UTC timestamp to readable date with time
 function formatDate(utcSeconds: number): string {
   if (utcSeconds === 0) {
     return '--'
   }
   const date = new Date(utcSeconds * 1000)
-  return date.toISOString().split('T')[0]
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hours}:${minutes}`
 }
+
+// Sort column type
+type SortColumn = 'id' | 'date' | 'size'
+type SortDirection = 'asc' | 'desc'
 
 export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: DroneLogsPanelProps) {
   const navigate = useNavigate()
@@ -55,7 +65,12 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
     totalCount: 0,
     downloadedLogs: [],
     error: null,
+    abortController: null,
   })
+
+  // Sort state - default to date descending (most recent first)
+  const [sortColumn, setSortColumn] = useState<SortColumn>('date')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
 
   const connection = getDroneConnection()
 
@@ -141,6 +156,8 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
     const selectedLogs = logs.filter((log) => selectedIds.has(log.id))
     if (selectedLogs.length === 0) return
 
+    const abortController = new AbortController()
+
     setDownloadState({
       isDownloading: true,
       currentLogId: null,
@@ -149,11 +166,17 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
       totalCount: selectedLogs.length,
       downloadedLogs: [],
       error: null,
+      abortController,
     })
 
     const downloadedLogs: DownloadedLog[] = []
 
     for (let i = 0; i < selectedLogs.length; i++) {
+      // Check if download was cancelled
+      if (abortController.signal.aborted) {
+        break
+      }
+
       const logEntry = selectedLogs[i]
 
       setDownloadState((prev) => ({
@@ -164,16 +187,21 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
           bytesReceived: 0,
           totalBytes: logEntry.size,
           percent: 0,
+          speedKBps: 0,
         },
       }))
 
       try {
-        const downloadedLog = await connection.downloadLog(logEntry, (progress) => {
-          setDownloadState((prev) => ({
-            ...prev,
-            currentProgress: progress,
-          }))
-        })
+        const downloadedLog = await connection.downloadLog(
+          logEntry,
+          (progress) => {
+            setDownloadState((prev) => ({
+              ...prev,
+              currentProgress: progress,
+            }))
+          },
+          abortController.signal
+        )
 
         downloadedLogs.push(downloadedLog)
 
@@ -183,10 +211,21 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
           downloadedLogs: [...prev.downloadedLogs, downloadedLog],
         }))
       } catch (err) {
+        const errorMessage = (err as Error).message
+        // Don't show error for cancelled downloads
+        if (errorMessage === 'Download cancelled') {
+          setDownloadState((prev) => ({
+            ...prev,
+            isDownloading: false,
+            abortController: null,
+          }))
+          return
+        }
         setDownloadState((prev) => ({
           ...prev,
           isDownloading: false,
-          error: `Failed to download log ${logEntry.id}: ${(err as Error).message}`,
+          error: `Failed to download log ${logEntry.id}: ${errorMessage}`,
+          abortController: null,
         }))
         return
       }
@@ -198,6 +237,7 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
       isDownloading: false,
       currentLogId: null,
       currentProgress: null,
+      abortController: null,
     }))
 
     // Notify parent of downloaded logs and clear state if callback provided
@@ -212,10 +252,41 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
     }
   }, [logs, selectedIds, connection, onLogsDownloaded])
 
-  // Sort logs by date (most recent first)
+  // Cancel ongoing download
+  const handleCancelDownload = useCallback(() => {
+    if (downloadState.abortController) {
+      downloadState.abortController.abort()
+    }
+  }, [downloadState.abortController])
+
+  // Sort logs based on current sort column and direction
   const sortedLogs = useMemo(() => {
-    return [...logs].sort((a, b) => b.timeUtc - a.timeUtc)
-  }, [logs])
+    return [...logs].sort((a, b) => {
+      let comparison = 0
+      switch (sortColumn) {
+        case 'id':
+          comparison = a.id - b.id
+          break
+        case 'date':
+          comparison = a.timeUtc - b.timeUtc
+          break
+        case 'size':
+          comparison = a.size - b.size
+          break
+      }
+      return sortDirection === 'asc' ? comparison : -comparison
+    })
+  }, [logs, sortColumn, sortDirection])
+
+  // Toggle sort column - if same column, toggle direction; if different column, set to descending
+  const handleSort = (column: SortColumn) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortColumn(column)
+      setSortDirection('desc')
+    }
+  }
 
   // Navigate to upload page with downloaded log
   const handleUploadLog = useCallback((downloadedLog: DownloadedLog) => {
@@ -384,17 +455,39 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
                 </span>
               )}
             </span>
-            <span>
-              {formatSize(downloadState.currentProgress.bytesReceived)} / {formatSize(downloadState.currentProgress.totalBytes)}
-            </span>
+            <div className="flex items-center gap-3">
+              <span>
+                {formatSize(downloadState.currentProgress.bytesReceived)} / {formatSize(downloadState.currentProgress.totalBytes)}
+              </span>
+              <span className="text-blue-600 font-medium">
+                {downloadState.currentProgress.speedKBps.toFixed(1)} kB/s
+              </span>
+            </div>
           </div>
-          <div className="w-full bg-blue-200 rounded-full h-2.5">
-            <div
-              className="bg-blue-600 h-2.5 rounded-full transition-all duration-150"
-              style={{ width: `${downloadState.currentProgress.percent}%` }}
-            />
+          <div className="flex items-center gap-3">
+            <div className="flex-1 bg-blue-200 rounded-full h-2.5">
+              <div
+                className="bg-blue-600 h-2.5 rounded-full transition-all duration-150"
+                style={{ width: `${downloadState.currentProgress.percent}%` }}
+              />
+            </div>
+            <button
+              onClick={handleCancelDownload}
+              className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 flex items-center gap-1"
+              title="Stop download"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+              Stop
+            </button>
           </div>
-          <div className="text-xs text-blue-600 mt-1 text-right">
+          <div className="text-xs text-blue-600 mt-1">
             {downloadState.currentProgress.percent}%
           </div>
         </div>
@@ -481,14 +574,47 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
                 <th scope="col" className="w-10 px-3 py-2 text-left">
                   <span className="sr-only">Select</span>
                 </th>
-                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  ID
+                <th
+                  scope="col"
+                  className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('id')}
+                >
+                  <div className="flex items-center gap-1">
+                    ID
+                    {sortColumn === 'id' && (
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={sortDirection === 'asc' ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'} />
+                      </svg>
+                    )}
+                  </div>
                 </th>
-                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date
+                <th
+                  scope="col"
+                  className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('date')}
+                >
+                  <div className="flex items-center gap-1">
+                    Date
+                    {sortColumn === 'date' && (
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={sortDirection === 'asc' ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'} />
+                      </svg>
+                    )}
+                  </div>
                 </th>
-                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Size
+                <th
+                  scope="col"
+                  className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('size')}
+                >
+                  <div className="flex items-center gap-1">
+                    Size
+                    {sortColumn === 'size' && (
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={sortDirection === 'asc' ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'} />
+                      </svg>
+                    )}
+                  </div>
                 </th>
               </tr>
             </thead>

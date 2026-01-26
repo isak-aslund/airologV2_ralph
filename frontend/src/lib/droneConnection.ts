@@ -48,6 +48,7 @@ export interface DownloadProgress {
   bytesReceived: number
   totalBytes: number
   percent: number
+  speedKBps: number // Download speed in kB/s
 }
 
 // Downloaded log result
@@ -388,11 +389,13 @@ export class DroneConnection {
    *
    * @param logEntry - The log entry to download (from requestLogList)
    * @param onProgress - Optional callback for progress updates
+   * @param abortSignal - Optional AbortSignal to cancel the download
    * @returns Promise that resolves with the downloaded log as a Blob
    */
   async downloadLog(
     logEntry: DroneLogEntry,
-    onProgress?: (progress: DownloadProgress) => void
+    onProgress?: (progress: DownloadProgress) => void,
+    abortSignal?: AbortSignal
   ): Promise<DownloadedLog> {
     if (this._state !== 'connected') {
       throw new Error('Not connected')
@@ -410,6 +413,7 @@ export class DroneConnection {
       let currentOffset = 0
       let timeoutId: ReturnType<typeof setTimeout> | null = null
       let isComplete = false
+      const startTime = Date.now() // Track start time for speed calculation
 
       // Store the original onLogData handler
       const originalOnLogData = this.events.onLogData
@@ -420,8 +424,25 @@ export class DroneConnection {
           clearTimeout(timeoutId)
           timeoutId = null
         }
+        // Remove abort listener if it exists
+        abortSignal?.removeEventListener('abort', handleAbort)
         // Restore original handler
         this.events.onLogData = originalOnLogData
+      }
+
+      // Handle abort signal
+      const handleAbort = () => {
+        cleanup()
+        reject(new Error('Download cancelled'))
+      }
+
+      // Set up abort listener
+      if (abortSignal) {
+        if (abortSignal.aborted) {
+          reject(new Error('Download cancelled'))
+          return
+        }
+        abortSignal.addEventListener('abort', handleAbort)
       }
 
       // Reset timeout on each data chunk received
@@ -501,13 +522,16 @@ export class DroneConnection {
           }
         }
 
-        // Report progress
+        // Report progress with speed calculation
         if (onProgress) {
+          const elapsedSeconds = (Date.now() - startTime) / 1000
+          const speedKBps = elapsedSeconds > 0 ? (bytesReceived / 1024) / elapsedSeconds : 0
           onProgress({
             logId,
             bytesReceived,
             totalBytes: totalSize,
             percent: Math.round((bytesReceived / totalSize) * 100),
+            speedKBps: Math.round(speedKBps * 10) / 10, // Round to 1 decimal
           })
         }
 
