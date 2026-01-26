@@ -34,7 +34,7 @@ interface DroneLogState {
 export default function UploadPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [fromDrone, setFromDrone] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const [isExtracting, setIsExtracting] = useState(false)
@@ -103,7 +103,7 @@ export default function UploadPage() {
       const { blob, filename } = state.droneLog
       // Convert Blob to File object
       const file = new File([blob], filename, { type: 'application/octet-stream' })
-      setSelectedFile(file)
+      setSelectedFiles([file])
       setFromDrone(true)
 
       // Clear the navigation state to prevent re-processing on refresh
@@ -123,9 +123,10 @@ export default function UploadPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Extract metadata when file is selected
+  // Extract metadata when a single file is selected (for single-file mode - will be enhanced in future story)
   useEffect(() => {
-    if (!selectedFile) {
+    // Only extract metadata for single file selection (existing behavior)
+    if (selectedFiles.length !== 1) {
       setMetadata(null)
       setExtractionError(null)
       return
@@ -137,7 +138,7 @@ export default function UploadPage() {
       setMetadata(null)
 
       try {
-        const result = await extractMetadata(selectedFile)
+        const result = await extractMetadata(selectedFiles[0])
         setMetadata(result)
       } catch (err) {
         setExtractionError(
@@ -149,7 +150,7 @@ export default function UploadPage() {
     }
 
     doExtract()
-  }, [selectedFile])
+  }, [selectedFiles])
 
   // Validate required form fields
   const validateForm = useCallback((): boolean => {
@@ -174,17 +175,17 @@ export default function UploadPage() {
   // Check if form is valid for enabling submit button (without setting errors)
   const isFormValid = formData.title.trim() && formData.pilot.trim() && formData.drone_model
 
-  // Handle form submission
+  // Handle form submission (single file mode - will be enhanced in future story for batch)
   const handleSubmit = async () => {
-    if (!validateForm() || !selectedFile) return
+    if (!validateForm() || selectedFiles.length === 0) return
 
     setIsUploading(true)
     setUploadError(null)
 
     try {
-      // Build FormData with file and all metadata
+      // For now, upload only the first file (batch upload will be added in future story)
       const uploadData = new FormData()
-      uploadData.append('file', selectedFile)
+      uploadData.append('file', selectedFiles[0])
       uploadData.append('title', formData.title.trim())
       uploadData.append('pilot', formData.pilot.trim())
       uploadData.append('drone_model', formData.drone_model)
@@ -238,17 +239,32 @@ export default function UploadPage() {
     p.toLowerCase().includes(formData.pilot.toLowerCase())
   )
 
-  const handleFileSelect = useCallback((file: File | null) => {
-    if (file && !file.name.toLowerCase().endsWith('.ulg')) {
-      alert('Please select a .ulg file')
-      return
+  const handleFilesSelect = useCallback((files: File[]) => {
+    // Filter to only .ulg files
+    const validFiles = files.filter(file => file.name.toLowerCase().endsWith('.ulg'))
+    const invalidCount = files.length - validFiles.length
+
+    if (invalidCount > 0) {
+      alert(`${invalidCount} file(s) were skipped because they are not .ulg files`)
     }
-    setSelectedFile(file)
+
+    if (validFiles.length > 0) {
+      // Add new files to existing selection (avoid duplicates by filename)
+      setSelectedFiles(prev => {
+        const existingNames = new Set(prev.map(f => f.name))
+        const newFiles = validFiles.filter(f => !existingNames.has(f.name))
+        return [...prev, ...newFiles]
+      })
+    }
   }, [])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null
-    handleFileSelect(file)
+    const files = Array.from(e.target.files || [])
+    handleFilesSelect(files)
+    // Reset input so the same files can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
   }
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -264,16 +280,34 @@ export default function UploadPage() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(false)
-    const file = e.dataTransfer.files?.[0] || null
-    handleFileSelect(file)
+    const files = Array.from(e.dataTransfer.files || [])
+    handleFilesSelect(files)
   }
 
   const handleBrowseClick = () => {
     fileInputRef.current?.click()
   }
 
-  const handleRemoveFile = () => {
-    setSelectedFile(null)
+  const handleRemoveFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index))
+    // Reset form state if all files removed
+    if (selectedFiles.length === 1) {
+      setMetadata(null)
+      setExtractionError(null)
+      setFromDrone(false)
+      setFormData({
+        title: '',
+        pilot: '',
+        drone_model: '',
+        comment: '',
+        tags: [],
+      })
+      setFormErrors({})
+    }
+  }
+
+  const handleRemoveAllFiles = () => {
+    setSelectedFiles([])
     setMetadata(null)
     setExtractionError(null)
     setFromDrone(false)
@@ -311,7 +345,7 @@ export default function UploadPage() {
           border-2 border-dashed rounded-lg p-8 text-center transition-colors
           ${isDragOver
             ? 'border-blue-500 bg-blue-50'
-            : selectedFile
+            : selectedFiles.length > 0
               ? 'border-green-400 bg-green-50'
               : 'border-gray-300 bg-gray-50 hover:border-gray-400'
           }
@@ -324,12 +358,13 @@ export default function UploadPage() {
           ref={fileInputRef}
           type="file"
           accept=".ulg"
+          multiple
           onChange={handleInputChange}
           className="hidden"
         />
 
-        {selectedFile ? (
-          // File Selected State
+        {selectedFiles.length > 0 ? (
+          // Files Selected State
           <div className="space-y-4">
             <div className="flex items-center justify-center gap-3">
               <svg
@@ -346,6 +381,8 @@ export default function UploadPage() {
                 />
               </svg>
             </div>
+
+            {/* File count and total size */}
             <div>
               {fromDrone && (
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mb-2">
@@ -355,23 +392,68 @@ export default function UploadPage() {
                   Downloaded from drone
                 </span>
               )}
-              <p className="text-lg font-semibold text-gray-900">{selectedFile.name}</p>
-              <p className="text-sm text-gray-500">{formatFileSize(selectedFile.size)}</p>
+              <p className="text-lg font-semibold text-gray-900">
+                {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''} selected
+              </p>
+              <p className="text-sm text-gray-500">
+                Total: {formatFileSize(selectedFiles.reduce((sum, f) => sum + f.size, 0))}
+              </p>
             </div>
+
+            {/* Scrollable file list */}
+            <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white">
+              {selectedFiles.map((file, index) => (
+                <div
+                  key={`${file.name}-${index}`}
+                  className="flex items-center justify-between px-4 py-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <svg
+                      className="w-5 h-5 text-gray-400 flex-shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                      />
+                    </svg>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
+                      <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveFile(index)}
+                    className="ml-2 p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                    title="Remove file"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+
             <div className="flex justify-center gap-3">
               <button
                 type="button"
                 onClick={handleBrowseClick}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
               >
-                Choose Different File
+                Add More Files
               </button>
               <button
                 type="button"
-                onClick={handleRemoveFile}
+                onClick={handleRemoveAllFiles}
                 className="px-4 py-2 text-sm font-medium text-red-700 bg-white border border-red-300 rounded-md hover:bg-red-50"
               >
-                Remove
+                Remove All
               </button>
             </div>
           </div>
@@ -412,7 +494,7 @@ export default function UploadPage() {
       </div>
 
       {/* Metadata Extraction Section */}
-      {selectedFile && (
+      {selectedFiles.length > 0 && (
         <div className="mt-8 p-6 bg-white rounded-lg border border-gray-200">
           {isExtracting ? (
             // Loading State
