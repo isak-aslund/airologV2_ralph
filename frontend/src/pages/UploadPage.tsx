@@ -21,6 +21,15 @@ interface FormErrors {
   drone_model?: string
 }
 
+// Per-file override data
+interface FileOverride {
+  title: string  // Pre-populated from filename (without .ulg)
+  pilot: string  // Optional override for pilot
+  drone_model: DroneModel | ''  // Optional override for drone model
+  comment: string  // Optional comment
+  tags: string[]  // Optional tags
+}
+
 // Navigation state interface for receiving drone log from DroneLogsPanel
 interface DroneLogState {
   droneLog?: {
@@ -44,6 +53,10 @@ export default function UploadPage() {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadSuccess, setUploadSuccess] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Per-file override state
+  const [fileOverrides, setFileOverrides] = useState<Map<string, FileOverride>>(new Map())
+  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
 
   // Form state
   const [formData, setFormData] = useState<FormData>({
@@ -87,6 +100,52 @@ export default function UploadPage() {
   const formatCoordinates = (lat: number | null, lon: number | null): string | null => {
     if (lat === null || lon === null) return null
     return `${lat.toFixed(6)}, ${lon.toFixed(6)}`
+  }
+
+  // Helper to get title from filename (without .ulg extension)
+  const getTitleFromFilename = (filename: string): string => {
+    return filename.replace(/\.ulg$/i, '')
+  }
+
+  // Get or create override for a file
+  const getFileOverride = (filename: string): FileOverride => {
+    const existing = fileOverrides.get(filename)
+    if (existing) return existing
+    return {
+      title: getTitleFromFilename(filename),
+      pilot: '',
+      drone_model: '',
+      comment: '',
+      tags: [],
+    }
+  }
+
+  // Update override for a file
+  const updateFileOverride = (filename: string, field: keyof FileOverride, value: string | string[]) => {
+    setFileOverrides(prev => {
+      const newMap = new Map(prev)
+      const current = getFileOverride(filename)
+      newMap.set(filename, { ...current, [field]: value })
+      return newMap
+    })
+  }
+
+  // Toggle file expansion
+  const toggleFileExpanded = (filename: string) => {
+    setExpandedFiles(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(filename)) {
+        newSet.delete(filename)
+      } else {
+        newSet.add(filename)
+      }
+      return newSet
+    })
+  }
+
+  // Check if file is expanded
+  const isFileExpanded = (filename: string): boolean => {
+    return expandedFiles.has(filename)
   }
 
   // Load pilots for autocomplete
@@ -289,7 +348,21 @@ export default function UploadPage() {
   }
 
   const handleRemoveFile = (index: number) => {
+    const removedFile = selectedFiles[index]
     setSelectedFiles(prev => prev.filter((_, i) => i !== index))
+    // Remove override and expanded state for the removed file
+    if (removedFile) {
+      setFileOverrides(prev => {
+        const newMap = new Map(prev)
+        newMap.delete(removedFile.name)
+        return newMap
+      })
+      setExpandedFiles(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(removedFile.name)
+        return newSet
+      })
+    }
     // Reset form state if all files removed
     if (selectedFiles.length === 1) {
       setMetadata(null)
@@ -308,6 +381,8 @@ export default function UploadPage() {
 
   const handleRemoveAllFiles = () => {
     setSelectedFiles([])
+    setFileOverrides(new Map())
+    setExpandedFiles(new Set())
     setMetadata(null)
     setExtractionError(null)
     setFromDrone(false)
@@ -471,44 +546,150 @@ export default function UploadPage() {
               </p>
             </div>
 
-            {/* Scrollable file list */}
-            <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white">
-              {selectedFiles.map((file, index) => (
-                <div
-                  key={`${file.name}-${index}`}
-                  className="flex items-center justify-between px-4 py-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50"
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <svg
-                      className="w-5 h-5 text-gray-400 flex-shrink-0"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-                      />
-                    </svg>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
-                      <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveFile(index)}
-                    className="ml-2 p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                    title="Remove file"
+            {/* Scrollable file list with expandable overrides */}
+            <div className="max-h-96 overflow-y-auto border border-gray-200 rounded-lg bg-white">
+              {selectedFiles.map((file, index) => {
+                const override = getFileOverride(file.name)
+                const expanded = isFileExpanded(file.name)
+                return (
+                  <div
+                    key={`${file.name}-${index}`}
+                    className="border-b border-gray-100 last:border-b-0"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
+                    {/* File header row */}
+                    <div className="flex items-center justify-between px-4 py-3 hover:bg-gray-50">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        {/* Expand/collapse button */}
+                        <button
+                          type="button"
+                          onClick={() => toggleFileExpanded(file.name)}
+                          className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                          title={expanded ? 'Collapse' : 'Expand to edit details'}
+                        >
+                          <svg
+                            className={`w-4 h-4 transition-transform ${expanded ? 'rotate-90' : ''}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          </svg>
+                        </button>
+                        <svg
+                          className="w-5 h-5 text-gray-400 flex-shrink-0"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                          />
+                        </svg>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
+                          <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFile(index)}
+                        className="ml-2 p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                        title="Remove file"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    {/* Expandable override section */}
+                    {expanded && (
+                      <div className="px-4 pb-4 pt-2 bg-gray-50 border-t border-gray-100">
+                        <div className="space-y-3">
+                          {/* Title field - always shown */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">
+                              Title
+                            </label>
+                            <input
+                              type="text"
+                              value={override.title}
+                              onChange={(e) => updateFileOverride(file.name, 'title', e.target.value)}
+                              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder={getTitleFromFilename(file.name)}
+                            />
+                          </div>
+
+                          {/* Optional override fields */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {/* Pilot override */}
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">
+                                Pilot <span className="text-gray-400">(override)</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={override.pilot}
+                                onChange={(e) => updateFileOverride(file.name, 'pilot', e.target.value)}
+                                className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                placeholder="Use default if empty"
+                              />
+                            </div>
+
+                            {/* Drone model override */}
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">
+                                Drone Model <span className="text-gray-400">(override)</span>
+                              </label>
+                              <select
+                                value={override.drone_model}
+                                onChange={(e) => updateFileOverride(file.name, 'drone_model', e.target.value)}
+                                className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                <option value="">Use default if empty</option>
+                                {DRONE_MODELS.map((model) => (
+                                  <option key={model} value={model}>
+                                    {model}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Comment override */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">
+                              Comment <span className="text-gray-400">(override)</span>
+                            </label>
+                            <textarea
+                              value={override.comment}
+                              onChange={(e) => updateFileOverride(file.name, 'comment', e.target.value)}
+                              rows={2}
+                              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Use default if empty"
+                            />
+                          </div>
+
+                          {/* Tags override */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">
+                              Tags <span className="text-gray-400">(override)</span>
+                            </label>
+                            <TagInput
+                              selectedTags={override.tags}
+                              onTagsChange={(tags) => updateFileOverride(file.name, 'tags', tags)}
+                              placeholder="Use default if empty"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
 
             <div className="flex justify-center gap-3">
