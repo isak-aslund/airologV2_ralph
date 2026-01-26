@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getDroneConnection } from '../lib/droneConnection'
 import type { ConnectionState, DroneLogEntry, DownloadProgress, DownloadedLog } from '../lib/droneConnection'
@@ -211,6 +211,11 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
       }))
     }
   }, [logs, selectedIds, connection, onLogsDownloaded])
+
+  // Sort logs by date (most recent first)
+  const sortedLogs = useMemo(() => {
+    return [...logs].sort((a, b) => b.timeUtc - a.timeUtc)
+  }, [logs])
 
   // Navigate to upload page with downloaded log
   const handleUploadLog = useCallback((downloadedLog: DownloadedLog) => {
@@ -488,7 +493,7 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {logs.map((log, index) => (
+              {sortedLogs.map((log, index) => (
                 <tr
                   key={log.id}
                   className={`${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${
