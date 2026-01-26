@@ -78,6 +78,7 @@ export default function UploadPage() {
   const [isBatchUploading, setIsBatchUploading] = useState(false)
   const [batchUploadIndex, setBatchUploadIndex] = useState(0)
   const [fileUploadStatuses, setFileUploadStatuses] = useState<Map<string, FileUploadStatus>>(new Map())
+  const [batchUploadComplete, setBatchUploadComplete] = useState(false)
 
   // Form state
   const [formData, setFormData] = useState<FormData>({
@@ -443,6 +444,151 @@ export default function UploadPage() {
     }
 
     setIsBatchUploading(false)
+    setBatchUploadComplete(true)
+  }
+
+  // Get batch upload results summary
+  const getBatchUploadSummary = () => {
+    let succeeded = 0
+    let failed = 0
+    fileUploadStatuses.forEach((status) => {
+      if (status.status === 'success') succeeded++
+      if (status.status === 'error') failed++
+    })
+    return { succeeded, failed, total: succeeded + failed }
+  }
+
+  // Check if all files uploaded successfully
+  const isAllFilesSucceeded = () => {
+    if (selectedFiles.length === 0) return false
+    return selectedFiles.every((file) => fileUploadStatuses.get(file.name)?.status === 'success')
+  }
+
+  // Retry upload for a single failed file
+  const handleRetryFile = async (file: File) => {
+    const override = getFileOverride(file.name)
+    const fileMetadata = fileMetadataStates.get(file.name)?.metadata
+
+    // Mark as uploading
+    setFileUploadStatuses(prev => {
+      const newMap = new Map(prev)
+      newMap.set(file.name, { status: 'uploading' })
+      return newMap
+    })
+
+    try {
+      const uploadData = new FormData()
+      uploadData.append('file', file)
+
+      // Use per-file title or default from filename
+      const title = override.title.trim() || getTitleFromFilename(file.name)
+      uploadData.append('title', title)
+
+      // Use per-file override or default
+      const pilot = override.pilot.trim() || formData.pilot.trim()
+      uploadData.append('pilot', pilot)
+
+      const droneModel = override.drone_model || formData.drone_model
+      uploadData.append('drone_model', droneModel)
+
+      // Comment: per-file override or default (if any)
+      const comment = override.comment.trim() || formData.comment.trim()
+      if (comment) {
+        uploadData.append('comment', comment)
+      }
+
+      // Serial number from metadata if available
+      if (fileMetadata?.serial_number) {
+        uploadData.append('serial_number', fileMetadata.serial_number)
+      }
+
+      // Tags: per-file override or default
+      const tags = override.tags.length > 0 ? override.tags : formData.tags
+      if (tags.length > 0) {
+        uploadData.append('tags', tags.join(','))
+      }
+
+      await createLog(uploadData)
+
+      // Mark as success
+      setFileUploadStatuses(prev => {
+        const newMap = new Map(prev)
+        newMap.set(file.name, { status: 'success' })
+        return newMap
+      })
+    } catch (err) {
+      // Mark as error
+      setFileUploadStatuses(prev => {
+        const newMap = new Map(prev)
+        newMap.set(file.name, {
+          status: 'error',
+          error: err instanceof Error ? err.message : 'Upload failed'
+        })
+        return newMap
+      })
+    }
+  }
+
+  // Clear all successfully uploaded files from the list
+  const handleClearCompleted = () => {
+    const remainingFiles = selectedFiles.filter(
+      (file) => fileUploadStatuses.get(file.name)?.status !== 'success'
+    )
+
+    // If all files were successful and we're clearing, reset everything
+    if (remainingFiles.length === 0) {
+      handleRemoveAllFiles()
+      return
+    }
+
+    // Update selected files to only include non-successful ones
+    setSelectedFiles(remainingFiles)
+
+    // Clean up state for removed files
+    const remainingNames = new Set(remainingFiles.map((f) => f.name))
+
+    setFileOverrides(prev => {
+      const newMap = new Map<string, FileOverride>()
+      prev.forEach((value, key) => {
+        if (remainingNames.has(key)) {
+          newMap.set(key, value)
+        }
+      })
+      return newMap
+    })
+
+    setExpandedFiles(prev => {
+      const newSet = new Set<string>()
+      prev.forEach((name) => {
+        if (remainingNames.has(name)) {
+          newSet.add(name)
+        }
+      })
+      return newSet
+    })
+
+    setFileMetadataStates(prev => {
+      const newMap = new Map<string, FileMetadataState>()
+      prev.forEach((value, key) => {
+        if (remainingNames.has(key)) {
+          newMap.set(key, value)
+        }
+      })
+      return newMap
+    })
+
+    setFileUploadStatuses(prev => {
+      const newMap = new Map<string, FileUploadStatus>()
+      prev.forEach((value, key) => {
+        if (remainingNames.has(key)) {
+          newMap.set(key, value)
+        }
+      })
+      return newMap
+    })
+
+    // Reset batch complete state since we still have files to process
+    setBatchUploadComplete(false)
   }
 
   // Form field handlers
@@ -566,6 +712,7 @@ export default function UploadPage() {
     setFromDrone(false)
     setIsBatchUploading(false)
     setBatchUploadIndex(0)
+    setBatchUploadComplete(false)
     setFormData({
       title: '',
       pilot: '',
@@ -839,8 +986,19 @@ export default function UploadPage() {
                             )}
                           </div>
                           <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
-                          {uploadStatus?.status === 'error' && uploadStatus.error && (
-                            <p className="text-xs text-red-500 mt-0.5">{uploadStatus.error}</p>
+                          {uploadStatus?.status === 'error' && (
+                            <div className="flex items-center gap-2 mt-0.5">
+                              {uploadStatus.error && (
+                                <p className="text-xs text-red-500">{uploadStatus.error}</p>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleRetryFile(file)}
+                                className="text-xs text-blue-600 hover:text-blue-800 font-medium hover:underline"
+                              >
+                                Retry
+                              </button>
+                            </div>
                           )}
                           {/* Metadata preview row */}
                           <div className="mt-1">
@@ -1023,14 +1181,59 @@ export default function UploadPage() {
               })}
             </div>
 
+            {/* Batch upload completion summary */}
+            {batchUploadComplete && (
+              <div className={`p-4 rounded-lg ${isAllFilesSucceeded() ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+                {isAllFilesSucceeded() ? (
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <svg className="h-5 w-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <p className="text-sm font-medium text-green-800">
+                        All {getBatchUploadSummary().succeeded} files uploaded successfully!
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/')}
+                      className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+                    >
+                      Go to Flight Logs
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center gap-2">
+                    <svg className="h-5 w-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <p className="text-sm font-medium text-amber-800">
+                      {getBatchUploadSummary().succeeded} succeeded, {getBatchUploadSummary().failed} failed
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex justify-center gap-3">
-              <button
-                type="button"
-                onClick={handleBrowseClick}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-              >
-                Add More Files
-              </button>
+              {!batchUploadComplete && (
+                <button
+                  type="button"
+                  onClick={handleBrowseClick}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Add More Files
+                </button>
+              )}
+              {batchUploadComplete && getBatchUploadSummary().succeeded > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearCompleted}
+                  className="px-4 py-2 text-sm font-medium text-green-700 bg-white border border-green-300 rounded-md hover:bg-green-50"
+                >
+                  Clear Completed
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleRemoveAllFiles}
