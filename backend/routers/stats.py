@@ -8,7 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models import DroneModel, FlightLog
+from backend.models import FlightLog
 from backend.schemas import ExtractedMetadataResponse, StatsResponse
 from backend.services.ulog_parser import extract_metadata
 
@@ -36,16 +36,15 @@ async def get_stats(
     )
     total_hours = total_seconds / 3600.0
 
-    # Get hours by drone model
+    # Get hours by drone model (query all distinct models from database)
     hours_by_model: dict[str, float] = {}
-    for model in DroneModel:
-        model_seconds = (
-            db.query(func.sum(FlightLog.duration_seconds))
-            .filter(FlightLog.drone_model == model)
-            .scalar()
-            or 0.0
-        )
-        hours_by_model[model.value] = model_seconds / 3600.0
+    model_stats = (
+        db.query(FlightLog.drone_model, func.sum(FlightLog.duration_seconds))
+        .group_by(FlightLog.drone_model)
+        .all()
+    )
+    for model, seconds in model_stats:
+        hours_by_model[model] = (seconds or 0.0) / 3600.0
 
     return {
         "total_flights": total_flights,
@@ -70,6 +69,24 @@ async def get_pilots(
         .all()
     )
     return [p[0] for p in pilots if p[0]]
+
+
+@router.get("/drone-models")
+async def get_drone_models(
+    db: Session = Depends(get_db),
+) -> list[str]:
+    """
+    Get list of unique drone models from the database.
+
+    Returns list of drone model values sorted alphabetically.
+    """
+    models = (
+        db.query(FlightLog.drone_model)
+        .distinct()
+        .order_by(FlightLog.drone_model)
+        .all()
+    )
+    return [m[0] for m in models if m[0]]
 
 
 @router.post("/extract-metadata", response_model=ExtractedMetadataResponse)

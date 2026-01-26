@@ -1,6 +1,5 @@
 """SQLAlchemy models for flight logs and tags."""
 
-import enum
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -11,12 +10,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.database import Base
 
 
-class DroneModel(str, enum.Enum):
-    """Enumeration of drone models."""
-
-    XLT = "XLT"
-    S1 = "S1"
-    CX10 = "CX10"
+# Common drone models (for reference, but drone_model field accepts any string)
+KNOWN_DRONE_MODELS = ["XLT", "S1", "CX10"]
 
 
 # Association table for many-to-many relationship between FlightLog and Tag
@@ -60,7 +55,7 @@ class FlightLog(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     pilot: Mapped[str] = mapped_column(String(100), nullable=False)
     serial_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    drone_model: Mapped[DroneModel] = mapped_column(Enum(DroneModel), nullable=False)
+    drone_model: Mapped[str] = mapped_column(String(50), nullable=False)
     duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

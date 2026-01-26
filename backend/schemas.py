@@ -5,8 +5,6 @@ from typing import Generic, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.models import DroneModel
-
 
 # Generic type for paginated responses
 T = TypeVar("T")
@@ -34,7 +32,7 @@ class FlightLogCreate(BaseModel):
 
     title: str = Field(..., min_length=1, max_length=255)
     pilot: str = Field(..., min_length=1, max_length=100)
-    drone_model: DroneModel
+    drone_model: str = Field(..., min_length=1, max_length=50)
     serial_number: Optional[str] = Field(None, max_length=100)
     duration_seconds: Optional[float] = None
     comment: Optional[str] = None
@@ -49,7 +47,7 @@ class FlightLogUpdate(BaseModel):
 
     title: Optional[str] = Field(None, min_length=1, max_length=255)
     pilot: Optional[str] = Field(None, min_length=1, max_length=100)
-    drone_model: Optional[DroneModel] = None
+    drone_model: Optional[str] = Field(None, min_length=1, max_length=50)
     comment: Optional[str] = None
     tags: Optional[list[str]] = None
 
@@ -63,7 +61,7 @@ class FlightLogResponse(BaseModel):
     title: str
     pilot: str
     serial_number: Optional[str]
-    drone_model: DroneModel
+    drone_model: str
     duration_seconds: Optional[float]
     file_path: str
     comment: Optional[str]

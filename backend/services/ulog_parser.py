@@ -202,7 +202,8 @@ def extract_metadata(
         pass
 
     # Get drone model from SYS_AUTOSTART parameter
-    # S1 = 4010, CX10 = 4030, XLT = 4006
+    # Known mappings: S1 = 4010, CX10 = 4030, XLT = 4006
+    # For unknown values, use the raw SYS_AUTOSTART value as the model
     drone_model: str | None = None
     try:
         params = ulog.initial_parameters
@@ -213,7 +214,7 @@ def extract_metadata(
                 4030: "CX10",
                 4006: "XLT",
             }
-            drone_model = autostart_to_model.get(autostart, "unknown")
+            drone_model = autostart_to_model.get(autostart, str(autostart))
     except Exception:
         pass
 

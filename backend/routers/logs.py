@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from backend.config import settings
 from backend.database import get_db
-from backend.models import DroneModel, FlightLog, Tag
+from backend.models import FlightLog, Tag
 from backend.schemas import ExtractedMetadataResponse, FlightLogResponse, FlightLogUpdate, PaginatedResponse, StatsResponse
 from backend.services.ulog_parser import extract_metadata, get_parameters
 
@@ -79,15 +79,9 @@ async def list_logs(
 
     # Apply drone_model filter
     if drone_model:
-        model_names = [m.strip().upper() for m in drone_model.split(",") if m.strip()]
-        valid_models = []
-        for name in model_names:
-            try:
-                valid_models.append(DroneModel(name))
-            except ValueError:
-                pass  # Skip invalid model names
-        if valid_models:
-            query = query.filter(FlightLog.drone_model.in_(valid_models))
+        model_names = [m.strip() for m in drone_model.split(",") if m.strip()]
+        if model_names:
+            query = query.filter(FlightLog.drone_model.in_(model_names))
 
     # Apply pilot exact match filter
     if pilot:
@@ -166,7 +160,7 @@ async def create_log(
     file: UploadFile = File(...),
     title: str = Form(...),
     pilot: str = Form(...),
-    drone_model: DroneModel = Form(...),
+    drone_model: str = Form(...),
     serial_number: str | None = Form(None),
     comment: str | None = Form(None),
     tags: str | None = Form(None),
