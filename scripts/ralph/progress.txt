@@ -16,6 +16,86 @@ Started: 2026-01-26
 - Flight date fallback: Parse from original filename if `time_ref_utc` is 0 (pattern: YYYY-MM-DD-HH-MM-SS)
 - GPS sources in ULog (try in order): `vehicle_gps_position`, `sensor_gps`, `vehicle_local_position.ref_lat/ref_lon`
 
+- UploadPage: `selectedFiles` is array of File objects, use `handleFilesSelect()` for adding files, `handleRemoveFile(index)` for removal
+- UploadPage: "Defaults for all files" section with pilot/drone model is shown above file list when files are selected
+- UploadPage: Per-file overrides stored in `fileOverrides` Map (keyed by filename), expansion state in `expandedFiles` Set
+- UploadPage: Per-file metadata stored in `fileMetadataStates` Map (keyed by filename) with `FileMetadataState` interface (isLoading, error, metadata)
+- Metadata extraction: useEffect triggers parallel extraction via Promise.all when new files added; only extracts for files not already in state
+- UploadPage: Batch upload state uses `isBatchUploading`, `batchUploadIndex`, `batchUploadComplete`, and `fileUploadStatuses` Map (keyed by filename) with `FileUploadStatus` interface
+- UploadPage: `handleBatchUpload()` uploads files sequentially, uses per-file overrides or defaults, continues on individual failures
+- UploadPage: After batch completes, `batchUploadComplete` triggers summary UI with success count/failed count, retry buttons, and clear completed button
+- UploadPage: `handleRetryFile(file)` retries a single failed file, `handleClearCompleted()` removes all successful files from list
+
+---
+
+## 2026-01-26 - US-048
+- What was implemented: Batch upload completion handling with retry for failed files and clear completed functionality
+- Files changed:
+  - `frontend/src/pages/UploadPage.tsx` - Added `batchUploadComplete` state, `getBatchUploadSummary()` helper, `isAllFilesSucceeded()` helper, `handleRetryFile()` for individual file retry, `handleClearCompleted()` to remove successful uploads, completion summary UI with success/failure counts, "Go to Flight Logs" button when all succeed
+- **Learnings for future iterations:**
+  - Batch completion tracked with `batchUploadComplete` boolean - set to true at end of `handleBatchUpload()`
+  - Summary UI shows in green box when all succeed, amber box when some failed
+  - "Clear Completed" button only appears when at least one file succeeded
+  - "Add More Files" button hidden after batch completes to encourage user to address failures or navigate away
+  - `handleClearCompleted()` filters out successful files and cleans up all related state Maps (overrides, expanded, metadata, upload status)
+  - Retry button appears inline with error message for each failed file
+---
+
+## 2026-01-26 - US-047
+- What was implemented: Batch upload submission with sequential uploads and per-file status tracking
+- Files changed:
+  - `frontend/src/pages/UploadPage.tsx` - Added `FileUploadStatus` interface, `isBatchUploading`/`batchUploadIndex`/`fileUploadStatuses` state, `isBatchUploadValid` validation, `handleBatchUpload()` for sequential uploads with per-file override support, per-file upload status icons (spinner/check/X) and labels, progress indicator in button ("Uploading X of Y"), state cleanup in remove functions
+- **Learnings for future iterations:**
+  - Batch upload uses sequential uploads (for loop with await) rather than parallel to avoid overwhelming the server
+  - Per-file status is tracked independently - a failure in one file doesn't stop the batch
+  - The button shows "Upload All (N files)" when idle and "Uploading X of Y..." during upload
+  - Per-file overrides are applied at upload time: title, pilot, drone_model, comment, tags fall back to defaults if not set
+  - Upload statuses are stored in `fileUploadStatuses` Map with status enum: pending, uploading, success, error
+---
+
+## 2026-01-26 - US-046
+- What was implemented: Per-file metadata preview with parallel extraction
+- Files changed:
+  - `frontend/src/pages/UploadPage.tsx` - Added `FileMetadataState` interface, `fileMetadataStates` Map state, parallel metadata extraction via Promise.all in useEffect, inline metadata display in file list (duration, date, serial, GPS), loading spinner per file, error state per file
+- **Learnings for future iterations:**
+  - Metadata extraction uses deduplication check (`!fileMetadataStates.get(file.name)`) to avoid re-extracting for already-processed files
+  - Per-file states are cleaned up in `handleRemoveFile` and `handleRemoveAllFiles`
+  - Legacy single-file state (`metadata`, `isExtracting`, `extractionError`) is still updated for backward compatibility with single-file upload flow
+  - Error state uses amber warning color to indicate file is still uploadable despite extraction failure
+  - useEffect dependency includes `fileMetadataStates` to properly trigger when state changes
+---
+
+## 2026-01-26 - US-045
+- What was implemented: Per-file override capability with expandable/collapsible sections
+- Files changed:
+  - `frontend/src/pages/UploadPage.tsx` - Added `FileOverride` interface, `fileOverrides` Map state, `expandedFiles` Set state, helper functions (`getFileOverride`, `updateFileOverride`, `toggleFileExpanded`, `isFileExpanded`, `getTitleFromFilename`), updated file list to render expandable override sections with chevron toggle
+- **Learnings for future iterations:**
+  - Override data stored in Map keyed by filename - allows preserving overrides even when file order changes
+  - Title is pre-populated from filename (without .ulg) using `getTitleFromFilename()` helper
+  - Override fields show "Use default if empty" or similar placeholder to indicate defaults apply
+  - State cleanup happens in `handleRemoveFile` and `handleRemoveAllFiles` to avoid stale override data
+  - TagInput component reused for per-file tags with custom placeholder
+---
+
+## 2026-01-26 - US-044
+- What was implemented: Common defaults form section for batch upload
+- Files changed:
+  - `frontend/src/pages/UploadPage.tsx` - Added "Defaults for all files" section with pilot input (autocomplete) and drone model dropdown above the file selection area; removed duplicate fields from lower Flight Details section
+- **Learnings for future iterations:**
+  - Common fields (pilot, drone_model) now appear above file list when files are selected
+  - Per-file fields (title, comment, tags) remain in the Flight Details section below metadata (for single file mode or future per-file overrides)
+  - Form validation (`isFormValid`) still checks all required fields including defaults
+---
+
+## 2026-01-26 - US-043
+- What was implemented: Multi-file selection in upload form
+- Files changed:
+  - `frontend/src/pages/UploadPage.tsx` - Changed from single file to array of files, added `multiple` attribute to input, created scrollable file list with remove buttons
+- **Learnings for future iterations:**
+  - Files selected via input are added to existing selection (not replaced) - allows incremental file picking
+  - Duplicates prevented by filename matching via `existingNames` Set
+  - Reset file input value after selection to allow re-selecting same files
+  - Metadata extraction still only works for single-file mode (will be enhanced in US-046)
 ---
 
 ## 2026-01-26 - US-042
