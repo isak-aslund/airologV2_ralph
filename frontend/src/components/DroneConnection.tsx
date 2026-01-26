@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import {
   getDroneConnection,
   isWebSerialSupported,
@@ -7,10 +8,13 @@ import type { ConnectionState } from '../lib/droneConnection'
 import type { HeartbeatMessage } from '../lib/mavlink'
 
 export default function DroneConnection() {
+  const navigate = useNavigate()
+  const location = useLocation()
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
   const [serialNumber, setSerialNumber] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isSupported] = useState(() => isWebSerialSupported())
+  const [hasNavigated, setHasNavigated] = useState(false)
 
   // Get the singleton connection instance
   const connection = getDroneConnection()
@@ -22,6 +26,7 @@ export default function DroneConnection() {
         setConnectionState(state)
         if (state === 'disconnected') {
           setSerialNumber(null)
+          setHasNavigated(false)
         }
       },
       onHeartbeat: (_heartbeat: HeartbeatMessage, sysId: number) => {
@@ -46,6 +51,14 @@ export default function DroneConnection() {
 
     // Cleanup not needed as we're using singleton
   }, [connection, serialNumber])
+
+  // Navigate to upload page when connected (only once per connection)
+  useEffect(() => {
+    if (connectionState === 'connected' && !hasNavigated && location.pathname !== '/upload') {
+      setHasNavigated(true)
+      navigate('/upload')
+    }
+  }, [connectionState, hasNavigated, navigate, location.pathname])
 
   const handleConnect = useCallback(async () => {
     setError(null)

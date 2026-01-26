@@ -79,3 +79,12 @@ export async function extractMetadata(file: File): Promise<ExtractedMetadata> {
   })
   return response.data
 }
+
+/**
+ * Upload a flight log to the Flight Review server.
+ * If already uploaded, returns the existing URL.
+ */
+export async function uploadToFlightReview(id: string): Promise<{ flight_review_id: string; url: string }> {
+  const response = await client.post<{ flight_review_id: string; url: string }>(`/logs/${id}/upload-to-flight-review`)
+  return response.data
+}

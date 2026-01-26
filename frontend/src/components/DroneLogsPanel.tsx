@@ -42,6 +42,7 @@ function formatDate(utcSeconds: number): string {
 export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: DroneLogsPanelProps) {
   const navigate = useNavigate()
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
+  const [droneSysId, setDroneSysId] = useState<number | null>(null)
   const [logs, setLogs] = useState<DroneLogEntry[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(false)
@@ -58,10 +59,11 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
 
   const connection = getDroneConnection()
 
-  // Track connection state
+  // Track connection state and heartbeat
   useEffect(() => {
     // Update state change handler to track connection
     const originalOnStateChange = connection['events']?.onStateChange
+    const originalOnHeartbeat = connection['events']?.onHeartbeat
     connection.setEventHandlers({
       ...connection['events'],
       onStateChange: (state) => {
@@ -71,20 +73,31 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
           setLogs([])
           setSelectedIds(new Set())
           setError(null)
+          setDroneSysId(null)
+        }
+      },
+      onHeartbeat: (heartbeat, sysId) => {
+        originalOnHeartbeat?.(heartbeat, sysId)
+        // Update drone system ID when heartbeat received
+        if (droneSysId === null) {
+          console.log('[DroneLogsPanel] Got heartbeat, setting sysId:', sysId)
+          setDroneSysId(sysId)
         }
       },
     })
 
     // Sync initial state
     setConnectionState(connection.state)
+    setDroneSysId(connection.droneSysId)
 
     return () => {
       // Cleanup not strictly needed for singleton
     }
-  }, [connection])
+  }, [connection, droneSysId])
 
   // Fetch logs from drone
   const fetchLogs = useCallback(async () => {
+    console.log('[DroneLogsPanel] fetchLogs called, connection.state:', connection.state)
     if (connection.state !== 'connected') {
       return
     }
@@ -93,23 +106,27 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
     setError(null)
 
     try {
+      console.log('[DroneLogsPanel] Requesting log list...')
       const droneLogList = await connection.requestLogList()
+      console.log('[DroneLogsPanel] Got', droneLogList.length, 'logs')
       setLogs(droneLogList)
       // Clear selection when refreshing
       setSelectedIds(new Set())
     } catch (err) {
+      console.error('[DroneLogsPanel] Error fetching logs:', err)
       setError((err as Error).message)
     } finally {
       setLoading(false)
     }
   }, [connection])
 
-  // Fetch logs when connection established
+  // Fetch logs when connection established AND we have the drone system ID (heartbeat received)
   useEffect(() => {
-    if (connectionState === 'connected' && logs.length === 0 && !loading) {
+    if (connectionState === 'connected' && logs.length === 0 && !loading && droneSysId !== null) {
+      console.log('[DroneLogsPanel] Connection ready with sysId:', droneSysId, '- fetching logs')
       fetchLogs()
     }
-  }, [connectionState, logs.length, loading, fetchLogs])
+  }, [connectionState, logs.length, loading, fetchLogs, droneSysId])
 
   // Notify parent when selection changes
   useEffect(() => {
@@ -118,31 +135,6 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
       onLogsSelected(selectedLogs)
     }
   }, [selectedIds, logs, onLogsSelected])
-
-  // Don't render if not connected
-  if (connectionState !== 'connected') {
-    return null
-  }
-
-  const handleSelectAll = () => {
-    setSelectedIds(new Set(logs.map((log) => log.id)))
-  }
-
-  const handleDeselectAll = () => {
-    setSelectedIds(new Set())
-  }
-
-  const handleToggleLog = (logId: number) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(logId)) {
-        next.delete(logId)
-      } else {
-        next.add(logId)
-      }
-      return next
-    })
-  }
 
   // Download selected logs from drone
   const handleDownloadSelected = useCallback(async () => {
@@ -208,19 +200,30 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
       currentProgress: null,
     }))
 
-    // Notify parent of downloaded logs
+    // Notify parent of downloaded logs and clear state if callback provided
     if (onLogsDownloaded && downloadedLogs.length > 0) {
       onLogsDownloaded(downloadedLogs)
+      // Clear selection and downloaded logs since they've been passed to parent
+      setSelectedIds(new Set())
+      setDownloadState((prev) => ({
+        ...prev,
+        downloadedLogs: [],
+      }))
     }
   }, [logs, selectedIds, connection, onLogsDownloaded])
 
   // Navigate to upload page with downloaded log
   const handleUploadLog = useCallback((downloadedLog: DownloadedLog) => {
     // Generate a filename for the blob based on log ID and timestamp
-    const date = downloadedLog.timeUtc > 0
-      ? new Date(downloadedLog.timeUtc * 1000).toISOString().split('T')[0]
-      : new Date().toISOString().split('T')[0]
-    const filename = `log_${downloadedLog.id}_${date}.ulg`
+    // Format: log_ID_YYYY-MM-DD-HH-MM-SS.ulg (backend expects full timestamp for date extraction)
+    const date = new Date(downloadedLog.timeUtc > 0 ? downloadedLog.timeUtc * 1000 : Date.now())
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    const seconds = String(date.getSeconds()).padStart(2, '0')
+    const filename = `log_${downloadedLog.id}_${year}-${month}-${day}-${hours}-${minutes}-${seconds}.ulg`
 
     // Navigate to upload page with the downloaded log data
     navigate('/upload', {
@@ -234,6 +237,33 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
       }
     })
   }, [navigate])
+
+  // Don't render if not connected
+  if (connectionState !== 'connected') {
+    console.log('[DroneLogsPanel] Not rendering - connectionState:', connectionState)
+    return null
+  }
+  console.log('[DroneLogsPanel] Rendering - connected, logs:', logs.length, 'loading:', loading)
+
+  const handleSelectAll = () => {
+    setSelectedIds(new Set(logs.map((log) => log.id)))
+  }
+
+  const handleDeselectAll = () => {
+    setSelectedIds(new Set())
+  }
+
+  const handleToggleLog = (logId: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(logId)) {
+        next.delete(logId)
+      } else {
+        next.add(logId)
+      }
+      return next
+    })
+  }
 
   const allSelected = logs.length > 0 && selectedIds.size === logs.length
   const noneSelected = selectedIds.size === 0

@@ -26,11 +26,11 @@ import type {
 } from './mavlink'
 
 // Connection constants
-const BAUD_RATE = 115200
+const BAUD_RATE = 921600 // High baud rate for faster transfers (fallback to 115200 if needed)
 const HEARTBEAT_INTERVAL_MS = 1000 // Send heartbeat every 1 second
 const LOG_LIST_TIMEOUT_MS = 5000 // Timeout for log list request
-const LOG_DATA_TIMEOUT_MS = 10000 // Timeout for each data chunk request
-const LOG_DATA_CHUNK_SIZE = 90 // Maximum bytes per LOG_DATA message
+const LOG_DATA_TIMEOUT_MS = 10000 // Timeout for data chunk request
+const LOG_REQUEST_CHUNK_SIZE = 4096 // Request 4KB at a time (drone streams back as multiple 90-byte messages)
 
 // Connection state
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected'
@@ -299,6 +299,8 @@ export class DroneConnection {
       throw new Error('Drone system ID not yet received. Wait for heartbeat.')
     }
 
+    console.log('[DroneConnection] Requesting log list from drone sysId:', this._droneSysId)
+
     return new Promise<DroneLogEntry[]>((resolve, reject) => {
       const logs: DroneLogEntry[] = []
       let expectedTotal = 0
@@ -321,6 +323,7 @@ export class DroneConnection {
       // Set up timeout
       timeoutId = setTimeout(() => {
         cleanup()
+        console.log('[DroneConnection] Log list timeout - received', receivedCount, 'entries')
         if (receivedCount === 0) {
           reject(new Error('Timeout: No response from drone. Make sure the drone is connected and powered on.'))
         } else {
@@ -331,12 +334,14 @@ export class DroneConnection {
 
       // Set up handler to collect LOG_ENTRY messages
       this.events.onLogEntry = (entry) => {
+        console.log('[DroneConnection] Received LOG_ENTRY:', entry)
         // Call original handler if it exists
         originalOnLogEntry?.(entry)
 
         // Track expected total from first entry
         if (receivedCount === 0 && entry.numLogs > 0) {
           expectedTotal = entry.numLogs
+          console.log('[DroneConnection] Expecting', expectedTotal, 'total log entries')
         }
 
         // Add to logs list (ignore entries with size 0 which indicate empty slots)
@@ -353,6 +358,7 @@ export class DroneConnection {
         // Check if we've received all expected entries
         if (expectedTotal > 0 && receivedCount >= expectedTotal) {
           cleanup()
+          console.log('[DroneConnection] Received all', logs.length, 'log entries')
           // Sort by ID descending (most recent first based on ID)
           logs.sort((a, b) => b.id - a.id)
           resolve(logs)
@@ -367,7 +373,9 @@ export class DroneConnection {
         0xffff // request all logs
       )
 
+      console.log('[DroneConnection] Sending LOG_REQUEST_LIST message')
       this.send(requestMessage).catch((error) => {
+        console.error('[DroneConnection] Failed to send LOG_REQUEST_LIST:', error)
         cleanup()
         reject(error)
       })
@@ -431,22 +439,27 @@ export class DroneConnection {
         }, LOG_DATA_TIMEOUT_MS)
       }
 
-      // Request next chunk of data
+      // Track what we've requested
+      let requestedUpTo = 0
+
+      // Request next chunk of data (4KB at a time)
       const requestNextChunk = () => {
-        if (currentOffset >= totalSize || isComplete) {
+        if (requestedUpTo >= totalSize || isComplete) {
           return
         }
 
-        const remaining = totalSize - currentOffset
-        const chunkSize = Math.min(remaining, LOG_DATA_CHUNK_SIZE)
+        const remaining = totalSize - requestedUpTo
+        const chunkSize = Math.min(remaining, LOG_REQUEST_CHUNK_SIZE)
 
         const requestMessage = createLogRequestDataMessage(
           this._droneSysId!,
           MAV_COMP_ID_AUTOPILOT1,
           logId,
-          currentOffset,
+          requestedUpTo,
           chunkSize
         )
+
+        requestedUpTo += chunkSize
 
         this.send(requestMessage).catch((error) => {
           cleanup()
@@ -456,16 +469,14 @@ export class DroneConnection {
 
       // Assemble all chunks into final blob
       const assembleBlob = (): Blob => {
-        // Create a sorted array of offsets
-        const sortedOffsets = Array.from(chunks.keys()).sort((a, b) => a - b)
+        // Create a single contiguous buffer and copy each chunk to its proper position
+        const buffer = new Uint8Array(totalSize)
 
-        // Calculate total size and create buffer
-        const parts: ArrayBuffer[] = []
-        for (const offset of sortedOffsets) {
-          parts.push(chunks.get(offset)!.buffer as ArrayBuffer)
+        for (const [offset, data] of chunks) {
+          buffer.set(data, offset)
         }
 
-        return new Blob(parts, { type: 'application/octet-stream' })
+        return new Blob([buffer], { type: 'application/octet-stream' })
       }
 
       // Set up handler to collect LOG_DATA messages
@@ -482,6 +493,12 @@ export class DroneConnection {
         if (!chunks.has(data.ofs)) {
           chunks.set(data.ofs, data.data)
           bytesReceived += data.count
+
+          // Track highest offset received for requesting more data
+          const endOffset = data.ofs + data.count
+          if (endOffset > currentOffset) {
+            currentOffset = endOffset
+          }
         }
 
         // Report progress
@@ -509,10 +526,8 @@ export class DroneConnection {
             blob,
             timeUtc: logEntry.timeUtc,
           })
-        } else {
-          // Request next chunk
-          // The data offset + count tells us where the next chunk should start
-          currentOffset = data.ofs + data.count
+        } else if (currentOffset >= requestedUpTo && requestedUpTo < totalSize) {
+          // We've received all data from current request, request more
           requestNextChunk()
         }
       }
@@ -563,6 +578,11 @@ export class DroneConnection {
    * Handle a received MAVLink message
    */
   private handleMessage(message: MAVLinkMessage): void {
+    // Log all received messages for debugging
+    if (message.msgId !== MSG_ID_HEARTBEAT) {
+      console.log('[DroneConnection] Received message ID:', message.msgId, 'from sysId:', message.sysId, 'payload length:', message.payload.length)
+    }
+
     // Notify generic message handler
     this.events.onMessage?.(message)
 
@@ -574,6 +594,7 @@ export class DroneConnection {
           // Store the drone's system ID from the first heartbeat
           if (this._droneSysId === null) {
             this._droneSysId = message.sysId
+            console.log('[DroneConnection] Got first heartbeat from drone sysId:', message.sysId)
           }
           this.events.onHeartbeat?.(heartbeat, message.sysId)
         }
@@ -584,6 +605,8 @@ export class DroneConnection {
         const entry = parseLogEntry(message.payload)
         if (entry) {
           this.events.onLogEntry?.(entry)
+        } else {
+          console.warn('[DroneConnection] Failed to parse LOG_ENTRY message')
         }
         break
       }
@@ -592,6 +615,8 @@ export class DroneConnection {
         const data = parseLogData(message.payload)
         if (data) {
           this.events.onLogData?.(data)
+        } else {
+          console.warn('[DroneConnection] Failed to parse LOG_DATA message')
         }
         break
       }

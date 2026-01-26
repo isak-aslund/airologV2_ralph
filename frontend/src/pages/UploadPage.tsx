@@ -3,6 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { createLog, extractMetadata } from '../api/logs'
 import { getPilots } from '../api/pilots'
 import TagInput from '../components/TagInput'
+import DroneLogsPanel from '../components/DroneLogsPanel'
+import type { DownloadedLog } from '../lib/droneConnection'
 import type { DroneModel, ExtractedMetadata } from '../types'
 
 const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
@@ -219,6 +221,12 @@ export default function UploadPage() {
       return !state // Only extract for files we haven't seen before
     })
 
+    console.log('[UploadPage] Metadata extraction check:', {
+      selectedFiles: selectedFiles.map(f => f.name),
+      filesToExtract: filesToExtract.map(f => f.name),
+      fileMetadataStates: Array.from(fileMetadataStates.keys())
+    })
+
     if (filesToExtract.length === 0) {
       // All files already have metadata state - update legacy single-file state for single file mode
       if (selectedFiles.length === 1) {
@@ -231,6 +239,8 @@ export default function UploadPage() {
       }
       return
     }
+
+    console.log('[UploadPage] Starting metadata extraction for', filesToExtract.length, 'files')
 
     // Set loading state for new files
     setFileMetadataStates(prev => {
@@ -250,12 +260,16 @@ export default function UploadPage() {
 
     // Extract metadata in parallel using Promise.all
     const extractAll = async () => {
+      console.log('[UploadPage] Calling extractMetadata API for files:', filesToExtract.map(f => f.name))
       const results = await Promise.all(
         filesToExtract.map(async (file) => {
           try {
+            console.log('[UploadPage] Extracting metadata for:', file.name, 'size:', file.size)
             const metadata = await extractMetadata(file)
+            console.log('[UploadPage] Extraction successful for:', file.name, metadata)
             return { filename: file.name, metadata, error: null }
           } catch (err) {
+            console.error('[UploadPage] Extraction failed for:', file.name, err)
             return {
               filename: file.name,
               metadata: null,
@@ -264,6 +278,8 @@ export default function UploadPage() {
           }
         })
       )
+
+      console.log('[UploadPage] All extractions complete, updating state')
 
       // Update state with results
       setFileMetadataStates(prev => {
@@ -753,6 +769,31 @@ export default function UploadPage() {
     }
   }
 
+  // Handle logs downloaded from drone - convert to File objects and add to selectedFiles
+  const handleDroneLogsDownloaded = useCallback((downloadedLogs: DownloadedLog[]) => {
+    const newFiles: File[] = downloadedLogs.map((log) => {
+      // Generate filename with full timestamp: log_ID_YYYY-MM-DD-HH-MM-SS.ulg
+      // This format is parsed by the backend for flight_date extraction
+      const date = new Date(log.timeUtc > 0 ? log.timeUtc * 1000 : Date.now())
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      const hours = String(date.getHours()).padStart(2, '0')
+      const minutes = String(date.getMinutes()).padStart(2, '0')
+      const seconds = String(date.getSeconds()).padStart(2, '0')
+      const filename = `log_${log.id}_${year}-${month}-${day}-${hours}-${minutes}-${seconds}.ulg`
+      return new File([log.blob], filename, { type: 'application/octet-stream' })
+    })
+
+    // Add new files to existing selection (avoid duplicates by filename)
+    setSelectedFiles(prev => {
+      const existingNames = new Set(prev.map(f => f.name))
+      const uniqueNewFiles = newFiles.filter(f => !existingNames.has(f.name))
+      return [...prev, ...uniqueNewFiles]
+    })
+    setFromDrone(true)
+  }, [])
+
   // Helper to check which fields were extracted
   const getExtractionStatus = () => {
     if (!metadata) return []
@@ -768,6 +809,11 @@ export default function UploadPage() {
   return (
     <div className="container mx-auto px-3 sm:px-4 py-4 max-w-3xl">
       <h1 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Upload Flight Log</h1>
+
+      {/* Drone Logs Panel - shown when drone is connected */}
+      <div className="mb-6">
+        <DroneLogsPanel onLogsDownloaded={handleDroneLogsDownloaded} />
+      </div>
 
       {/* Defaults for all files - shown when files are selected */}
       {selectedFiles.length > 0 && (

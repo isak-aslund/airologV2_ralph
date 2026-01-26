@@ -236,14 +236,20 @@ function getNextSeq(): number {
 /**
  * Create a HEARTBEAT message
  * Used to maintain connection with the drone
+ * MAVLink wire format (sorted by type size):
+ * custom_mode: uint32 (offset 0-3)
+ * type: uint8 (offset 4)
+ * autopilot: uint8 (offset 5)
+ * base_mode: uint8 (offset 6)
+ * system_status: uint8 (offset 7)
+ * mavlink_version: uint8 (offset 8)
  */
 export function createHeartbeatMessage(sysId: number = 255): Uint8Array {
-  // HEARTBEAT payload: type(1) + autopilot(1) + base_mode(1) + custom_mode(4) + system_status(1) + mavlink_version(1) = 9 bytes
   const payload = new Uint8Array(9)
-  payload[0] = MAV_TYPE_GCS // type: GCS
-  payload[1] = MAV_AUTOPILOT_INVALID // autopilot: invalid (GCS doesn't have autopilot)
-  payload[2] = 0 // base_mode
-  // custom_mode is 4 bytes at offset 3, leave as 0
+  // custom_mode at offset 0-3, leave as 0
+  payload[4] = MAV_TYPE_GCS // type: GCS
+  payload[5] = MAV_AUTOPILOT_INVALID // autopilot: invalid (GCS doesn't have autopilot)
+  payload[6] = 0 // base_mode
   payload[7] = 0 // system_status: uninitialized
   payload[8] = 3 // mavlink_version
 
@@ -265,14 +271,18 @@ export function createLogRequestListMessage(
   start: number = 0,
   end: number = 0xffff
 ): Uint8Array {
-  // LOG_REQUEST_LIST payload: target_system(1) + target_component(1) + start(2) + end(2) = 6 bytes
+  // LOG_REQUEST_LIST payload - MAVLink wire format (sorted by type size):
+  // start: uint16 (offset 0-1)
+  // end: uint16 (offset 2-3)
+  // target_system: uint8 (offset 4)
+  // target_component: uint8 (offset 5)
   const payload = new Uint8Array(6)
-  payload[0] = targetSysId
-  payload[1] = targetCompId
-  payload[2] = start & 0xff
-  payload[3] = (start >> 8) & 0xff
-  payload[4] = end & 0xff
-  payload[5] = (end >> 8) & 0xff
+  payload[0] = start & 0xff
+  payload[1] = (start >> 8) & 0xff
+  payload[2] = end & 0xff
+  payload[3] = (end >> 8) & 0xff
+  payload[4] = targetSysId
+  payload[5] = targetCompId
 
   return createMAVLinkMessage(MSG_ID_LOG_REQUEST_LIST, payload, 255, MAV_COMP_ID_ALL, getNextSeq())
 }
@@ -294,46 +304,63 @@ export function createLogRequestDataMessage(
   offset: number,
   count: number
 ): Uint8Array {
-  // LOG_REQUEST_DATA payload: target_system(1) + target_component(1) + id(2) + ofs(4) + count(4) = 12 bytes
+  // LOG_REQUEST_DATA payload - MAVLink wire format (sorted by type size):
+  // ofs: uint32 (offset 0-3)
+  // count: uint32 (offset 4-7)
+  // id: uint16 (offset 8-9)
+  // target_system: uint8 (offset 10)
+  // target_component: uint8 (offset 11)
   const payload = new Uint8Array(12)
-  payload[0] = targetSysId
-  payload[1] = targetCompId
-  payload[2] = logId & 0xff
-  payload[3] = (logId >> 8) & 0xff
-  payload[4] = offset & 0xff
-  payload[5] = (offset >> 8) & 0xff
-  payload[6] = (offset >> 16) & 0xff
-  payload[7] = (offset >> 24) & 0xff
-  payload[8] = count & 0xff
-  payload[9] = (count >> 8) & 0xff
-  payload[10] = (count >> 16) & 0xff
-  payload[11] = (count >> 24) & 0xff
+  payload[0] = offset & 0xff
+  payload[1] = (offset >> 8) & 0xff
+  payload[2] = (offset >> 16) & 0xff
+  payload[3] = (offset >> 24) & 0xff
+  payload[4] = count & 0xff
+  payload[5] = (count >> 8) & 0xff
+  payload[6] = (count >> 16) & 0xff
+  payload[7] = (count >> 24) & 0xff
+  payload[8] = logId & 0xff
+  payload[9] = (logId >> 8) & 0xff
+  payload[10] = targetSysId
+  payload[11] = targetCompId
 
   return createMAVLinkMessage(MSG_ID_LOG_REQUEST_DATA, payload, 255, MAV_COMP_ID_ALL, getNextSeq())
 }
 
 /**
  * Parse a LOG_ENTRY message payload
+ * MAVLink wire format (sorted by type size):
+ * time_utc: uint32 (offset 0-3)
+ * size: uint32 (offset 4-7)
+ * id: uint16 (offset 8-9)
+ * num_logs: uint16 (offset 10-11)
+ * last_log_num: uint16 (offset 12-13)
+ *
+ * Note: MAVLink allows trailing zero bytes to be omitted, so payload may be shorter than 14 bytes
  */
 export function parseLogEntry(payload: Uint8Array): LogEntryMessage | null {
-  if (payload.length < 14) return null
+  // Minimum 10 bytes needed (time_utc + size + id)
+  if (payload.length < 10) return null
+
+  // Helper to safely get byte (returns 0 if out of bounds - handles MAVLink zero trimming)
+  const getByte = (index: number) => index < payload.length ? payload[index] : 0
 
   return {
-    // uint16_t id (offset 0)
-    id: payload[0] | (payload[1] << 8),
-    // uint16_t num_logs (offset 2)
-    numLogs: payload[2] | (payload[3] << 8),
-    // uint16_t last_log_num (offset 4)
-    lastLogNum: payload[4] | (payload[5] << 8),
-    // uint32_t time_utc (offset 6)
-    timeUtc: payload[6] | (payload[7] << 8) | (payload[8] << 16) | (payload[9] << 24),
-    // uint32_t size (offset 10)
-    size: payload[10] | (payload[11] << 8) | (payload[12] << 16) | (payload[13] << 24),
+    timeUtc: getByte(0) | (getByte(1) << 8) | (getByte(2) << 16) | ((getByte(3) << 24) >>> 0),
+    size: getByte(4) | (getByte(5) << 8) | (getByte(6) << 16) | ((getByte(7) << 24) >>> 0),
+    id: getByte(8) | (getByte(9) << 8),
+    numLogs: getByte(10) | (getByte(11) << 8),
+    lastLogNum: getByte(12) | (getByte(13) << 8),
   }
 }
 
 /**
  * Parse a LOG_DATA message payload
+ * MAVLink wire format (sorted by type size):
+ * ofs: uint32 (offset 0-3)
+ * id: uint16 (offset 4-5)
+ * count: uint8 (offset 6)
+ * data: uint8[90] (offset 7+)
  */
 export function parseLogData(payload: Uint8Array): LogDataMessage | null {
   if (payload.length < 7) return null
@@ -342,29 +369,31 @@ export function parseLogData(payload: Uint8Array): LogDataMessage | null {
   const data = payload.slice(7, 7 + count)
 
   return {
-    // uint16_t id (offset 0)
-    id: payload[0] | (payload[1] << 8),
-    // uint32_t ofs (offset 2)
-    ofs: payload[2] | (payload[3] << 8) | (payload[4] << 16) | (payload[5] << 24),
-    // uint8_t count (offset 6)
+    ofs: payload[0] | (payload[1] << 8) | (payload[2] << 16) | ((payload[3] << 24) >>> 0),
+    id: payload[4] | (payload[5] << 8),
     count,
-    // uint8_t[90] data (offset 7)
     data: new Uint8Array(data),
   }
 }
 
 /**
  * Parse a HEARTBEAT message payload
+ * MAVLink wire format (sorted by type size):
+ * custom_mode: uint32 (offset 0-3)
+ * type: uint8 (offset 4)
+ * autopilot: uint8 (offset 5)
+ * base_mode: uint8 (offset 6)
+ * system_status: uint8 (offset 7)
+ * mavlink_version: uint8 (offset 8)
  */
 export function parseHeartbeat(payload: Uint8Array): HeartbeatMessage | null {
   if (payload.length < 9) return null
 
   return {
-    type: payload[0],
-    autopilot: payload[1],
-    baseMode: payload[2],
-    // custom_mode is uint32_t at offset 3 (little-endian)
-    customMode: payload[3] | (payload[4] << 8) | (payload[5] << 16) | (payload[6] << 24),
+    customMode: payload[0] | (payload[1] << 8) | (payload[2] << 16) | ((payload[3] << 24) >>> 0),
+    type: payload[4],
+    autopilot: payload[5],
+    baseMode: payload[6],
     systemStatus: payload[7],
     mavlinkVersion: payload[8],
   }
