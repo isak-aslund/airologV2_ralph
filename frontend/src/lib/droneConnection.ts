@@ -30,7 +30,7 @@ const BAUD_RATE = 921600 // High baud rate for faster transfers (fallback to 115
 const HEARTBEAT_INTERVAL_MS = 1000 // Send heartbeat every 1 second
 const LOG_LIST_TIMEOUT_MS = 5000 // Timeout for log list request
 const LOG_DATA_TIMEOUT_MS = 10000 // Timeout for data chunk request
-const LOG_REQUEST_CHUNK_SIZE = 4096 // Request 4KB at a time (drone streams back as multiple 90-byte messages)
+const LOG_REQUEST_CHUNK_SIZE = 32768 // Request 32KB at a time (drone streams back as multiple 90-byte messages)
 
 // Connection state
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected'
