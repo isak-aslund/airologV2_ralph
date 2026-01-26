@@ -339,6 +339,77 @@ export default function UploadPage() {
     <div className="container mx-auto px-3 sm:px-4 py-4 max-w-3xl">
       <h1 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Upload Flight Log</h1>
 
+      {/* Defaults for all files - shown when files are selected */}
+      {selectedFiles.length > 0 && (
+        <div className="mb-6 p-6 bg-white rounded-lg border border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Defaults for all files</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Pilot with autocomplete */}
+            <div ref={pilotContainerRef} className="relative">
+              <label htmlFor="default-pilot" className="block text-sm font-medium text-gray-700 mb-1">
+                Pilot <span className="text-red-500">*</span>
+              </label>
+              <input
+                ref={pilotInputRef}
+                type="text"
+                id="default-pilot"
+                value={formData.pilot}
+                onChange={(e) => handleFormChange('pilot', e.target.value)}
+                onFocus={() => setShowPilotSuggestions(true)}
+                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  formErrors.pilot ? 'border-red-500' : 'border-gray-300'
+                }`}
+                placeholder="Enter pilot name"
+                autoComplete="off"
+              />
+              {formErrors.pilot && (
+                <p className="mt-1 text-sm text-red-600">{formErrors.pilot}</p>
+              )}
+              {/* Pilot autocomplete dropdown */}
+              {showPilotSuggestions && filteredPilots.length > 0 && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                  {filteredPilots.map((pilot) => (
+                    <button
+                      key={pilot}
+                      type="button"
+                      onClick={() => handlePilotSelect(pilot)}
+                      className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none"
+                    >
+                      {pilot}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Drone Model */}
+            <div>
+              <label htmlFor="default-drone-model" className="block text-sm font-medium text-gray-700 mb-1">
+                Drone Model <span className="text-red-500">*</span>
+              </label>
+              <select
+                id="default-drone-model"
+                value={formData.drone_model}
+                onChange={(e) => handleFormChange('drone_model', e.target.value)}
+                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  formErrors.drone_model ? 'border-red-500' : 'border-gray-300'
+                }`}
+              >
+                <option value="">Select drone model</option>
+                {DRONE_MODELS.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+              </select>
+              {formErrors.drone_model && (
+                <p className="mt-1 text-sm text-red-600">{formErrors.drone_model}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* File Selection Area */}
       <div
         className={`
@@ -645,69 +716,6 @@ export default function UploadPage() {
                     />
                     {formErrors.title && (
                       <p className="mt-1 text-sm text-red-600">{formErrors.title}</p>
-                    )}
-                  </div>
-
-                  {/* Pilot with autocomplete */}
-                  <div ref={pilotContainerRef} className="relative">
-                    <label htmlFor="pilot" className="block text-sm font-medium text-gray-700 mb-1">
-                      Pilot <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      ref={pilotInputRef}
-                      type="text"
-                      id="pilot"
-                      value={formData.pilot}
-                      onChange={(e) => handleFormChange('pilot', e.target.value)}
-                      onFocus={() => setShowPilotSuggestions(true)}
-                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                        formErrors.pilot ? 'border-red-500' : 'border-gray-300'
-                      }`}
-                      placeholder="Enter pilot name"
-                      autoComplete="off"
-                    />
-                    {formErrors.pilot && (
-                      <p className="mt-1 text-sm text-red-600">{formErrors.pilot}</p>
-                    )}
-                    {/* Pilot autocomplete dropdown */}
-                    {showPilotSuggestions && filteredPilots.length > 0 && (
-                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-40 overflow-y-auto">
-                        {filteredPilots.map((pilot) => (
-                          <button
-                            key={pilot}
-                            type="button"
-                            onClick={() => handlePilotSelect(pilot)}
-                            className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none"
-                          >
-                            {pilot}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Drone Model */}
-                  <div>
-                    <label htmlFor="drone_model" className="block text-sm font-medium text-gray-700 mb-1">
-                      Drone Model <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      id="drone_model"
-                      value={formData.drone_model}
-                      onChange={(e) => handleFormChange('drone_model', e.target.value)}
-                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                        formErrors.drone_model ? 'border-red-500' : 'border-gray-300'
-                      }`}
-                    >
-                      <option value="">Select drone model</option>
-                      {DRONE_MODELS.map((model) => (
-                        <option key={model} value={model}>
-                          {model}
-                        </option>
-                      ))}
-                    </select>
-                    {formErrors.drone_model && (
-                      <p className="mt-1 text-sm text-red-600">{formErrors.drone_model}</p>
                     )}
                   </div>
 
