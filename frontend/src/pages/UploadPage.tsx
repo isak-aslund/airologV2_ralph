@@ -37,6 +37,12 @@ interface FileMetadataState {
   metadata: ExtractedMetadata | null
 }
 
+// Per-file upload status (for batch upload)
+interface FileUploadStatus {
+  status: 'pending' | 'uploading' | 'success' | 'error'
+  error?: string
+}
+
 // Navigation state interface for receiving drone log from DroneLogsPanel
 interface DroneLogState {
   droneLog?: {
@@ -67,6 +73,11 @@ export default function UploadPage() {
 
   // Per-file metadata state (for batch metadata preview)
   const [fileMetadataStates, setFileMetadataStates] = useState<Map<string, FileMetadataState>>(new Map())
+
+  // Batch upload state
+  const [isBatchUploading, setIsBatchUploading] = useState(false)
+  const [batchUploadIndex, setBatchUploadIndex] = useState(0)
+  const [fileUploadStatuses, setFileUploadStatuses] = useState<Map<string, FileUploadStatus>>(new Map())
 
   // Form state
   const [formData, setFormData] = useState<FormData>({
@@ -346,6 +357,94 @@ export default function UploadPage() {
     }
   }
 
+  // Check if batch upload is valid (defaults set + multiple files)
+  const isBatchUploadValid = formData.pilot.trim() && formData.drone_model && selectedFiles.length > 0
+
+  // Handle batch upload submission (for multiple files)
+  const handleBatchUpload = async () => {
+    if (!isBatchUploadValid) return
+
+    setIsBatchUploading(true)
+    setBatchUploadIndex(0)
+    setUploadError(null)
+
+    // Initialize all files as pending
+    const initialStatuses = new Map<string, FileUploadStatus>()
+    selectedFiles.forEach(file => {
+      initialStatuses.set(file.name, { status: 'pending' })
+    })
+    setFileUploadStatuses(initialStatuses)
+
+    // Upload files sequentially
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i]
+      const override = getFileOverride(file.name)
+      const fileMetadata = fileMetadataStates.get(file.name)?.metadata
+
+      // Update current file index and status
+      setBatchUploadIndex(i)
+      setFileUploadStatuses(prev => {
+        const newMap = new Map(prev)
+        newMap.set(file.name, { status: 'uploading' })
+        return newMap
+      })
+
+      try {
+        const uploadData = new FormData()
+        uploadData.append('file', file)
+
+        // Use per-file title or default from filename
+        const title = override.title.trim() || getTitleFromFilename(file.name)
+        uploadData.append('title', title)
+
+        // Use per-file override or default
+        const pilot = override.pilot.trim() || formData.pilot.trim()
+        uploadData.append('pilot', pilot)
+
+        const droneModel = override.drone_model || formData.drone_model
+        uploadData.append('drone_model', droneModel)
+
+        // Comment: per-file override or default (if any)
+        const comment = override.comment.trim() || formData.comment.trim()
+        if (comment) {
+          uploadData.append('comment', comment)
+        }
+
+        // Serial number from metadata if available
+        if (fileMetadata?.serial_number) {
+          uploadData.append('serial_number', fileMetadata.serial_number)
+        }
+
+        // Tags: per-file override or default
+        const tags = override.tags.length > 0 ? override.tags : formData.tags
+        if (tags.length > 0) {
+          uploadData.append('tags', tags.join(','))
+        }
+
+        await createLog(uploadData)
+
+        // Mark as success
+        setFileUploadStatuses(prev => {
+          const newMap = new Map(prev)
+          newMap.set(file.name, { status: 'success' })
+          return newMap
+        })
+      } catch (err) {
+        // Mark as error but continue with next file
+        setFileUploadStatuses(prev => {
+          const newMap = new Map(prev)
+          newMap.set(file.name, {
+            status: 'error',
+            error: err instanceof Error ? err.message : 'Upload failed'
+          })
+          return newMap
+        })
+      }
+    }
+
+    setIsBatchUploading(false)
+  }
+
   // Form field handlers
   const handleFormChange = (field: keyof FormData, value: string | string[]) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
@@ -434,6 +533,11 @@ export default function UploadPage() {
         newMap.delete(removedFile.name)
         return newMap
       })
+      setFileUploadStatuses(prev => {
+        const newMap = new Map(prev)
+        newMap.delete(removedFile.name)
+        return newMap
+      })
     }
     // Reset form state if all files removed
     if (selectedFiles.length === 1) {
@@ -456,9 +560,12 @@ export default function UploadPage() {
     setFileOverrides(new Map())
     setExpandedFiles(new Set())
     setFileMetadataStates(new Map())
+    setFileUploadStatuses(new Map())
     setMetadata(null)
     setExtractionError(null)
     setFromDrone(false)
+    setIsBatchUploading(false)
+    setBatchUploadIndex(0)
     setFormData({
       title: '',
       pilot: '',
@@ -628,6 +735,7 @@ export default function UploadPage() {
                 const fileMetadata = metadataState?.metadata
                 const isFileLoading = metadataState?.isLoading ?? true
                 const fileError = metadataState?.error
+                const uploadStatus = fileUploadStatuses.get(file.name)
                 return (
                   <div
                     key={`${file.name}-${index}`}
@@ -652,22 +760,88 @@ export default function UploadPage() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                           </svg>
                         </button>
-                        <svg
-                          className="w-5 h-5 text-gray-400 flex-shrink-0"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-                          />
-                        </svg>
+                        {/* Upload status icon or file icon */}
+                        {uploadStatus?.status === 'uploading' ? (
+                          <svg
+                            className="animate-spin w-5 h-5 text-blue-500 flex-shrink-0"
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                          >
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            />
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            />
+                          </svg>
+                        ) : uploadStatus?.status === 'success' ? (
+                          <svg
+                            className="w-5 h-5 text-green-500 flex-shrink-0"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                          </svg>
+                        ) : uploadStatus?.status === 'error' ? (
+                          <svg
+                            className="w-5 h-5 text-red-500 flex-shrink-0"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                          </svg>
+                        ) : (
+                          <svg
+                            className="w-5 h-5 text-gray-400 flex-shrink-0"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                            />
+                          </svg>
+                        )}
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
+                            {uploadStatus?.status === 'uploading' && (
+                              <span className="text-xs text-blue-600 font-medium">Uploading...</span>
+                            )}
+                            {uploadStatus?.status === 'success' && (
+                              <span className="text-xs text-green-600 font-medium">Uploaded</span>
+                            )}
+                            {uploadStatus?.status === 'error' && (
+                              <span className="text-xs text-red-600 font-medium" title={uploadStatus.error}>Failed</span>
+                            )}
+                          </div>
                           <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                          {uploadStatus?.status === 'error' && uploadStatus.error && (
+                            <p className="text-xs text-red-500 mt-0.5">{uploadStatus.error}</p>
+                          )}
                           {/* Metadata preview row */}
                           <div className="mt-1">
                             {isFileLoading ? (
@@ -1140,46 +1314,89 @@ export default function UploadPage() {
 
                   {/* Submit Button */}
                   <div className="pt-4">
-                    <button
-                      type="button"
-                      onClick={handleSubmit}
-                      disabled={!isFormValid || isUploading || uploadSuccess}
-                      className={`w-full py-3 px-4 text-white font-semibold rounded-md transition-colors flex items-center justify-center gap-2 ${
-                        isFormValid && !isUploading && !uploadSuccess
-                          ? 'bg-blue-600 hover:bg-blue-700'
-                          : 'bg-gray-400 cursor-not-allowed'
-                      }`}
-                    >
-                      {isUploading ? (
-                        <>
-                          <svg
-                            className="animate-spin h-5 w-5 text-white"
-                            xmlns="http://www.w3.org/2000/svg"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                          >
-                            <circle
-                              className="opacity-25"
-                              cx="12"
-                              cy="12"
-                              r="10"
-                              stroke="currentColor"
-                              strokeWidth="4"
-                            />
-                            <path
-                              className="opacity-75"
-                              fill="currentColor"
-                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                            />
-                          </svg>
-                          Uploading...
-                        </>
-                      ) : uploadSuccess ? (
-                        'Uploaded!'
-                      ) : (
-                        'Upload Flight Log'
-                      )}
-                    </button>
+                    {selectedFiles.length > 1 ? (
+                      // Batch upload button
+                      <button
+                        type="button"
+                        onClick={handleBatchUpload}
+                        disabled={!isBatchUploadValid || isBatchUploading}
+                        className={`w-full py-3 px-4 text-white font-semibold rounded-md transition-colors flex items-center justify-center gap-2 ${
+                          isBatchUploadValid && !isBatchUploading
+                            ? 'bg-blue-600 hover:bg-blue-700'
+                            : 'bg-gray-400 cursor-not-allowed'
+                        }`}
+                      >
+                        {isBatchUploading ? (
+                          <>
+                            <svg
+                              className="animate-spin h-5 w-5 text-white"
+                              xmlns="http://www.w3.org/2000/svg"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                              />
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                              />
+                            </svg>
+                            Uploading {batchUploadIndex + 1} of {selectedFiles.length}...
+                          </>
+                        ) : (
+                          `Upload All (${selectedFiles.length} files)`
+                        )}
+                      </button>
+                    ) : (
+                      // Single file upload button
+                      <button
+                        type="button"
+                        onClick={handleSubmit}
+                        disabled={!isFormValid || isUploading || uploadSuccess}
+                        className={`w-full py-3 px-4 text-white font-semibold rounded-md transition-colors flex items-center justify-center gap-2 ${
+                          isFormValid && !isUploading && !uploadSuccess
+                            ? 'bg-blue-600 hover:bg-blue-700'
+                            : 'bg-gray-400 cursor-not-allowed'
+                        }`}
+                      >
+                        {isUploading ? (
+                          <>
+                            <svg
+                              className="animate-spin h-5 w-5 text-white"
+                              xmlns="http://www.w3.org/2000/svg"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                              />
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                              />
+                            </svg>
+                            Uploading...
+                          </>
+                        ) : uploadSuccess ? (
+                          'Uploaded!'
+                        ) : (
+                          'Upload Flight Log'
+                        )}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
