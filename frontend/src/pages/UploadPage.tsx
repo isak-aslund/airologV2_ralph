@@ -30,6 +30,13 @@ interface FileOverride {
   tags: string[]  // Optional tags
 }
 
+// Per-file metadata state (for batch preview)
+interface FileMetadataState {
+  isLoading: boolean
+  error: string | null
+  metadata: ExtractedMetadata | null
+}
+
 // Navigation state interface for receiving drone log from DroneLogsPanel
 interface DroneLogState {
   droneLog?: {
@@ -57,6 +64,9 @@ export default function UploadPage() {
   // Per-file override state
   const [fileOverrides, setFileOverrides] = useState<Map<string, FileOverride>>(new Map())
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
+
+  // Per-file metadata state (for batch metadata preview)
+  const [fileMetadataStates, setFileMetadataStates] = useState<Map<string, FileMetadataState>>(new Map())
 
   // Form state
   const [formData, setFormData] = useState<FormData>({
@@ -182,34 +192,91 @@ export default function UploadPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Extract metadata when a single file is selected (for single-file mode - will be enhanced in future story)
+  // Extract metadata for all selected files in parallel
   useEffect(() => {
-    // Only extract metadata for single file selection (existing behavior)
-    if (selectedFiles.length !== 1) {
+    if (selectedFiles.length === 0) {
       setMetadata(null)
       setExtractionError(null)
+      setIsExtracting(false)
       return
     }
 
-    const doExtract = async () => {
+    // Find files that need metadata extraction (not already loading or loaded)
+    const filesToExtract = selectedFiles.filter(file => {
+      const state = fileMetadataStates.get(file.name)
+      return !state // Only extract for files we haven't seen before
+    })
+
+    if (filesToExtract.length === 0) {
+      // All files already have metadata state - update legacy single-file state for single file mode
+      if (selectedFiles.length === 1) {
+        const state = fileMetadataStates.get(selectedFiles[0].name)
+        if (state) {
+          setIsExtracting(state.isLoading)
+          setExtractionError(state.error)
+          setMetadata(state.metadata)
+        }
+      }
+      return
+    }
+
+    // Set loading state for new files
+    setFileMetadataStates(prev => {
+      const newMap = new Map(prev)
+      for (const file of filesToExtract) {
+        newMap.set(file.name, { isLoading: true, error: null, metadata: null })
+      }
+      return newMap
+    })
+
+    // For single file mode, also update legacy state
+    if (selectedFiles.length === 1) {
       setIsExtracting(true)
       setExtractionError(null)
       setMetadata(null)
+    }
 
-      try {
-        const result = await extractMetadata(selectedFiles[0])
-        setMetadata(result)
-      } catch (err) {
-        setExtractionError(
-          err instanceof Error ? err.message : 'Failed to extract metadata from file'
-        )
-      } finally {
+    // Extract metadata in parallel using Promise.all
+    const extractAll = async () => {
+      const results = await Promise.all(
+        filesToExtract.map(async (file) => {
+          try {
+            const metadata = await extractMetadata(file)
+            return { filename: file.name, metadata, error: null }
+          } catch (err) {
+            return {
+              filename: file.name,
+              metadata: null,
+              error: err instanceof Error ? err.message : 'Failed to extract metadata'
+            }
+          }
+        })
+      )
+
+      // Update state with results
+      setFileMetadataStates(prev => {
+        const newMap = new Map(prev)
+        for (const result of results) {
+          newMap.set(result.filename, {
+            isLoading: false,
+            error: result.error,
+            metadata: result.metadata
+          })
+        }
+        return newMap
+      })
+
+      // For single file mode, also update legacy state
+      if (selectedFiles.length === 1 && results.length === 1) {
+        const result = results[0]
         setIsExtracting(false)
+        setExtractionError(result.error)
+        setMetadata(result.metadata)
       }
     }
 
-    doExtract()
-  }, [selectedFiles])
+    extractAll()
+  }, [selectedFiles, fileMetadataStates])
 
   // Validate required form fields
   const validateForm = useCallback((): boolean => {
@@ -350,7 +417,7 @@ export default function UploadPage() {
   const handleRemoveFile = (index: number) => {
     const removedFile = selectedFiles[index]
     setSelectedFiles(prev => prev.filter((_, i) => i !== index))
-    // Remove override and expanded state for the removed file
+    // Remove override, expanded state, and metadata state for the removed file
     if (removedFile) {
       setFileOverrides(prev => {
         const newMap = new Map(prev)
@@ -361,6 +428,11 @@ export default function UploadPage() {
         const newSet = new Set(prev)
         newSet.delete(removedFile.name)
         return newSet
+      })
+      setFileMetadataStates(prev => {
+        const newMap = new Map(prev)
+        newMap.delete(removedFile.name)
+        return newMap
       })
     }
     // Reset form state if all files removed
@@ -383,6 +455,7 @@ export default function UploadPage() {
     setSelectedFiles([])
     setFileOverrides(new Map())
     setExpandedFiles(new Set())
+    setFileMetadataStates(new Map())
     setMetadata(null)
     setExtractionError(null)
     setFromDrone(false)
@@ -551,6 +624,10 @@ export default function UploadPage() {
               {selectedFiles.map((file, index) => {
                 const override = getFileOverride(file.name)
                 const expanded = isFileExpanded(file.name)
+                const metadataState = fileMetadataStates.get(file.name)
+                const fileMetadata = metadataState?.metadata
+                const isFileLoading = metadataState?.isLoading ?? true
+                const fileError = metadataState?.error
                 return (
                   <div
                     key={`${file.name}-${index}`}
@@ -591,6 +668,86 @@ export default function UploadPage() {
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
                           <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                          {/* Metadata preview row */}
+                          <div className="mt-1">
+                            {isFileLoading ? (
+                              // Loading spinner
+                              <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                                <svg
+                                  className="animate-spin h-3 w-3"
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <circle
+                                    className="opacity-25"
+                                    cx="12"
+                                    cy="12"
+                                    r="10"
+                                    stroke="currentColor"
+                                    strokeWidth="4"
+                                  />
+                                  <path
+                                    className="opacity-75"
+                                    fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                  />
+                                </svg>
+                                <span>Extracting metadata...</span>
+                              </div>
+                            ) : fileError ? (
+                              // Error state
+                              <div className="flex items-center gap-1.5 text-xs text-amber-600">
+                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                                <span title={fileError}>Metadata extraction failed (file still uploadable)</span>
+                              </div>
+                            ) : fileMetadata ? (
+                              // Metadata preview
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-500">
+                                {fileMetadata.duration_seconds !== null && (
+                                  <span className="inline-flex items-center gap-1">
+                                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    {formatDuration(fileMetadata.duration_seconds)}
+                                  </span>
+                                )}
+                                {fileMetadata.flight_date !== null && (
+                                  <span className="inline-flex items-center gap-1">
+                                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                    {formatDate(fileMetadata.flight_date)}
+                                  </span>
+                                )}
+                                {fileMetadata.serial_number !== null && (
+                                  <span className="inline-flex items-center gap-1">
+                                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                                    </svg>
+                                    {fileMetadata.serial_number}
+                                  </span>
+                                )}
+                                {fileMetadata.takeoff_lat !== null && fileMetadata.takeoff_lon !== null && (
+                                  <span className="inline-flex items-center gap-1">
+                                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                    {formatCoordinates(fileMetadata.takeoff_lat, fileMetadata.takeoff_lon)}
+                                  </span>
+                                )}
+                                {fileMetadata.duration_seconds === null &&
+                                  fileMetadata.flight_date === null &&
+                                  fileMetadata.serial_number === null &&
+                                  fileMetadata.takeoff_lat === null && (
+                                  <span className="text-gray-400">No metadata available</span>
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                       <button
