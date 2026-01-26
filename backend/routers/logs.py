@@ -182,7 +182,7 @@ async def create_log(
         )
 
     # Extract metadata from the file
-    metadata = extract_metadata(file_path)
+    metadata = extract_metadata(file_path, original_filename=file.filename)
 
     # Parse tags from comma-separated string
     tag_names: list[str] = []
