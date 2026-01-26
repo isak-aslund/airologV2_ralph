@@ -8,6 +8,53 @@ from typing import Any
 
 from pyulog import ULog
 
+# PX4 flight mode mapping from vehicle_status.nav_state
+FLIGHT_MODES = {
+    0: "Manual",
+    1: "Altitude",
+    2: "Position",
+    3: "Mission",
+    4: "Loiter",
+    5: "Return to Land",
+    10: "Acro",
+    12: "Descend",
+    14: "Offboard",
+    15: "Stabilized",
+    17: "Takeoff",
+    18: "Land",
+    19: "Follow Target",
+    20: "Precision Land",
+    21: "Orbit",
+}
+
+
+def extract_flight_modes(ulog: ULog) -> list[str]:
+    """
+    Extract unique flight modes from vehicle_status.nav_state.
+
+    Args:
+        ulog: Parsed ULog object
+
+    Returns:
+        Sorted list of unique human-readable flight mode names
+    """
+    modes: set[str] = set()
+
+    try:
+        for ds in ulog.data_list:
+            if ds.name == "vehicle_status":
+                nav_states = ds.data.get("nav_state")
+                if nav_states is not None:
+                    for state in nav_states:
+                        mode_name = FLIGHT_MODES.get(int(state))
+                        if mode_name:
+                            modes.add(mode_name)
+                break
+    except Exception:
+        pass
+
+    return sorted(modes)
+
 
 def _parse_date_from_filename(filename: str) -> datetime | None:
     """
@@ -94,6 +141,7 @@ def extract_metadata(
             "drone_model": None,
             "takeoff_lat": None,
             "takeoff_lon": None,
+            "flight_modes": [],
         }
 
     # Calculate duration from first to last timestamp
@@ -232,6 +280,9 @@ def extract_metadata(
         except (KeyError, IndexError, ValueError, Exception):
             pass
 
+    # Extract flight modes from vehicle_status
+    flight_modes = extract_flight_modes(ulog)
+
     return {
         "duration_seconds": duration_seconds,
         "flight_date": flight_date,
@@ -239,6 +290,7 @@ def extract_metadata(
         "drone_model": drone_model,
         "takeoff_lat": takeoff_lat,
         "takeoff_lon": takeoff_lon,
+        "flight_modes": flight_modes,
     }
 
 

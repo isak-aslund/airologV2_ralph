@@ -10,7 +10,7 @@ import DeleteConfirmModal from '../components/DeleteConfirmModal'
 import ParameterModal from '../components/ParameterModal'
 import EditLogModal from '../components/EditLogModal'
 import DroneLogsPanel from '../components/DroneLogsPanel'
-import { getLogs, downloadLog } from '../api/logs'
+import { getLogs, downloadLog, uploadToFlightReview } from '../api/logs'
 import type { FlightLog, PaginatedResponse, DroneModel } from '../types'
 
 const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
@@ -26,12 +26,16 @@ function parseFiltersFromParams(searchParams: URLSearchParams): FilterState {
   const tagsParam = searchParams.get('tags')
   const tags = tagsParam ? tagsParam.split(',').filter(Boolean) : []
 
+  const flightModesParam = searchParams.get('flight_modes')
+  const flightModes = flightModesParam ? flightModesParam.split(',').filter(Boolean) : []
+
   return {
     dateFrom: searchParams.get('date_from') || '',
     dateTo: searchParams.get('date_to') || '',
     droneModels,
     pilot: searchParams.get('pilot') || '',
     tags,
+    flightModes,
   }
 }
 
@@ -57,6 +61,7 @@ export default function LogListPage() {
   const [deleteModalLog, setDeleteModalLog] = useState<FlightLog | null>(null)
   const [parameterModalLog, setParameterModalLog] = useState<FlightLog | null>(null)
   const [editModalLog, setEditModalLog] = useState<FlightLog | null>(null)
+  const [uploadingFlightReviewId, setUploadingFlightReviewId] = useState<string | null>(null)
 
   // Parse state from URL params
   const search = searchParams.get('search') || ''
@@ -98,6 +103,7 @@ export default function LogListPage() {
         drone_model: filters.droneModels.length > 0 ? filters.droneModels.join(',') : undefined,
         pilot: filters.pilot || undefined,
         tags: filters.tags.length > 0 ? filters.tags.join(',') : undefined,
+        flight_modes: filters.flightModes.length > 0 ? filters.flightModes.join(',') : undefined,
         date_from: filters.dateFrom || undefined,
         date_to: filters.dateTo || undefined,
       })
@@ -125,6 +131,7 @@ export default function LogListPage() {
       drone_model: newFilters.droneModels.length > 0 ? newFilters.droneModels.join(',') : undefined,
       pilot: newFilters.pilot || undefined,
       tags: newFilters.tags.length > 0 ? newFilters.tags.join(',') : undefined,
+      flight_modes: newFilters.flightModes.length > 0 ? newFilters.flightModes.join(',') : undefined,
     }, true)
   }
 
@@ -153,6 +160,11 @@ export default function LogListPage() {
           newFilters.tags = filters.tags.filter((t) => t !== value)
         }
         break
+      case 'flightModes':
+        if (value) {
+          newFilters.flightModes = filters.flightModes.filter((m) => m !== value)
+        }
+        break
     }
 
     // Update URL params based on modified filters
@@ -162,6 +174,7 @@ export default function LogListPage() {
       drone_model: newFilters.droneModels.length > 0 ? newFilters.droneModels.join(',') : undefined,
       pilot: newFilters.pilot || undefined,
       tags: newFilters.tags.length > 0 ? newFilters.tags.join(',') : undefined,
+      flight_modes: newFilters.flightModes.length > 0 ? newFilters.flightModes.join(',') : undefined,
     }, true)
   }
 
@@ -227,6 +240,36 @@ export default function LogListPage() {
     setParameterModalLog(null)
   }
 
+  const handleOpenFlightReview = async (log: FlightLog) => {
+    // If already uploaded, just open the URL
+    if (log.flight_review_id) {
+      window.open(`http://10.0.0.100:5006/plot_app?log=${log.flight_review_id}`, '_blank')
+      return
+    }
+
+    // Upload first, then open
+    try {
+      setUploadingFlightReviewId(log.id)
+      const result = await uploadToFlightReview(log.id)
+      window.open(result.url, '_blank')
+      // Update the log in local state so subsequent clicks don't re-upload
+      setLogsData((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          items: prev.items.map((item) =>
+            item.id === log.id ? { ...item, flight_review_id: result.flight_review_id } : item
+          ),
+        }
+      })
+    } catch (err) {
+      console.error('Error uploading to Flight Review:', err)
+      alert('Failed to upload to Flight Review. Please try again.')
+    } finally {
+      setUploadingFlightReviewId(null)
+    }
+  }
+
   return (
     <div className="container mx-auto p-4">
       <StatsHeader />
@@ -263,6 +306,8 @@ export default function LogListPage() {
             onDelete={handleDelete}
             onDownload={handleDownload}
             onViewParameters={handleViewParameters}
+            onOpenFlightReview={handleOpenFlightReview}
+            uploadingFlightReviewId={uploadingFlightReviewId}
           />
 
           {/* Pagination */}

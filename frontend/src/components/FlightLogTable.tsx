@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import type { FlightLog } from '../types'
 
-// Tooltip component for truncated comments
+// Tooltip component for truncated comments - uses portal to avoid overflow clipping
 interface TooltipProps {
   text: string
   children: React.ReactNode
@@ -10,9 +11,23 @@ interface TooltipProps {
 function Tooltip({ text, children }: TooltipProps) {
   const [isVisible, setIsVisible] = useState(false)
   const [delayHandler, setDelayHandler] = useState<ReturnType<typeof setTimeout> | null>(null)
+  const [position, setPosition] = useState<{ top: number; left: number; showBelow: boolean }>({ top: 0, left: 0, showBelow: false })
+  const triggerRef = useRef<HTMLDivElement>(null)
 
   const handleMouseEnter = () => {
     const handler = setTimeout(() => {
+      if (triggerRef.current) {
+        const rect = triggerRef.current.getBoundingClientRect()
+        const tooltipHeight = 80 // Approximate tooltip height
+        const spaceAbove = rect.top
+        const showBelow = spaceAbove < tooltipHeight
+
+        setPosition({
+          top: showBelow ? rect.bottom + 8 : rect.top - 8,
+          left: rect.left,
+          showBelow,
+        })
+      }
       setIsVisible(true)
     }, 200) // 200ms delay
     setDelayHandler(handler)
@@ -26,18 +41,57 @@ function Tooltip({ text, children }: TooltipProps) {
     setIsVisible(false)
   }
 
+  // Update position on scroll
+  useEffect(() => {
+    if (!isVisible) return
+
+    const updatePosition = () => {
+      if (triggerRef.current) {
+        const rect = triggerRef.current.getBoundingClientRect()
+        const tooltipHeight = 80
+        const spaceAbove = rect.top
+        const showBelow = spaceAbove < tooltipHeight
+
+        setPosition({
+          top: showBelow ? rect.bottom + 8 : rect.top - 8,
+          left: rect.left,
+          showBelow,
+        })
+      }
+    }
+
+    window.addEventListener('scroll', updatePosition, true)
+    return () => window.removeEventListener('scroll', updatePosition, true)
+  }, [isVisible])
+
   return (
     <div
-      className="relative inline-block"
+      ref={triggerRef}
+      className="inline-block"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
       {children}
-      {isVisible && (
-        <div className="absolute z-50 bottom-full left-0 mb-2 px-3 py-2 text-sm text-white bg-gray-900 rounded-md shadow-lg max-w-sm whitespace-normal break-words">
+      {isVisible && createPortal(
+        <div
+          className="fixed z-[9999] px-3 py-2 text-sm text-white bg-gray-900 rounded-md shadow-lg max-w-sm whitespace-normal break-words"
+          style={{
+            top: position.showBelow ? position.top : undefined,
+            bottom: position.showBelow ? undefined : `calc(100vh - ${position.top}px)`,
+            left: position.left,
+          }}
+        >
           {text}
-          <div className="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-900" />
-        </div>
+          {/* Arrow pointing to trigger */}
+          <div
+            className={`absolute left-4 w-0 h-0 border-l-4 border-r-4 border-l-transparent border-r-transparent ${
+              position.showBelow
+                ? 'bottom-full border-b-4 border-b-gray-900'
+                : 'top-full border-t-4 border-t-gray-900'
+            }`}
+          />
+        </div>,
+        document.body
       )}
     </div>
   )
@@ -50,6 +104,8 @@ interface FlightLogTableProps {
   onDelete?: (log: FlightLog) => void
   onDownload?: (log: FlightLog) => void
   onViewParameters?: (log: FlightLog) => void
+  onOpenFlightReview?: (log: FlightLog) => Promise<void>
+  uploadingFlightReviewId?: string | null
 }
 
 // Format duration from seconds to HH:MM:SS
@@ -83,6 +139,14 @@ function truncateComment(comment: string | null): { text: string; isTruncated: b
   return { text: comment, isTruncated: false, original: comment }
 }
 
+// Truncate title to 30 characters
+function truncateTitle(title: string): { text: string; isTruncated: boolean; original: string } {
+  if (title.length > 30) {
+    return { text: title.substring(0, 30) + '...', isTruncated: true, original: title }
+  }
+  return { text: title, isTruncated: false, original: title }
+}
+
 // Tag badge colors - cycle through a predefined set
 const TAG_COLORS = [
   'bg-blue-100 text-blue-800',
@@ -106,7 +170,7 @@ function TableSkeleton() {
         {/* Header skeleton */}
         <div className="bg-gray-50 border-b border-gray-200 px-4 py-3">
           <div className="flex gap-4">
-            {[40, 60, 80, 60, 100, 80, 100, 120, 80, 100].map((width, i) => (
+            {[40, 60, 80, 60, 100, 80, 100, 80, 120, 80, 100].map((width, i) => (
               <div key={i} className="h-4 bg-gray-200 rounded" style={{ width: `${width}px` }} />
             ))}
           </div>
@@ -122,6 +186,7 @@ function TableSkeleton() {
               <div className="h-4 w-32 bg-gray-200 rounded" />
               <div className="h-4 w-20 bg-gray-200 rounded" />
               <div className="h-4 w-24 bg-gray-200 rounded" />
+              <div className="h-4 w-20 bg-gray-200 rounded" />
               <div className="h-4 w-40 bg-gray-200 rounded" />
               <div className="h-4 w-20 bg-gray-200 rounded" />
               <div className="h-4 w-28 bg-gray-200 rounded" />
@@ -140,6 +205,8 @@ export default function FlightLogTable({
   onDelete,
   onDownload,
   onViewParameters,
+  onOpenFlightReview,
+  uploadingFlightReviewId,
 }: FlightLogTableProps) {
   if (loading) {
     return <TableSkeleton />
@@ -180,6 +247,9 @@ export default function FlightLogTable({
               Tags
             </th>
             <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Modes
+            </th>
+            <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Comment
             </th>
             <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -214,8 +284,18 @@ export default function FlightLogTable({
                 {log.pilot}
               </td>
               {/* Title */}
-              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                {log.title}
+              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 max-w-xs">
+                {(() => {
+                  const { text, isTruncated, original } = truncateTitle(log.title)
+                  if (isTruncated) {
+                    return (
+                      <Tooltip text={original}>
+                        <span className="cursor-default">{text}</span>
+                      </Tooltip>
+                    )
+                  }
+                  return text
+                })()}
               </td>
               {/* Duration */}
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500 font-mono">
@@ -235,6 +315,28 @@ export default function FlightLogTable({
                         {tag.name}
                       </span>
                     ))
+                  )}
+                </div>
+              </td>
+              {/* Modes */}
+              <td className="px-3 py-2 whitespace-nowrap">
+                <div className="flex flex-wrap gap-1">
+                  {!log.flight_modes || log.flight_modes.length === 0 ? (
+                    <span className="text-sm text-gray-400">--</span>
+                  ) : (
+                    <>
+                      {log.flight_modes.slice(0, 3).map((mode, modeIndex) => (
+                        <span
+                          key={modeIndex}
+                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800"
+                        >
+                          {mode}
+                        </span>
+                      ))}
+                      {log.flight_modes.length > 3 && (
+                        <span className="text-xs text-gray-500">+{log.flight_modes.length - 3} more</span>
+                      )}
+                    </>
                   )}
                 </div>
               </td>
@@ -303,18 +405,37 @@ export default function FlightLogTable({
                       </svg>
                     </button>
                   )}
-                  {/* Flight Review external link - always shown */}
-                  <a
-                    href={`http://10.0.0.100:5006/plot_app?log=${log.file_path.split('/').pop()}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-1 text-gray-400 hover:text-indigo-600"
-                    title="Open in Flight Review"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
-                  </a>
+                  {/* Flight Review - upload first if needed, then open */}
+                  {uploadingFlightReviewId === log.id ? (
+                    <span className="p-1 text-indigo-600" title="Uploading to Flight Review...">
+                      <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                    </span>
+                  ) : log.flight_review_id ? (
+                    <a
+                      href={`http://10.0.0.100:5006/plot_app?log=${log.flight_review_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1 text-indigo-600 hover:text-indigo-800"
+                      title="Open in Flight Review"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
+                  ) : (
+                    <button
+                      onClick={() => onOpenFlightReview?.(log)}
+                      className="p-1 text-gray-400 hover:text-indigo-600"
+                      title="Upload & Open in Flight Review"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               </td>
             </tr>

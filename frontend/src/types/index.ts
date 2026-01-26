@@ -24,6 +24,8 @@ export interface FlightLog {
   takeoff_lat: number | null;
   takeoff_lon: number | null;
   flight_date: string | null; // ISO date string
+  flight_review_id: string | null; // ID on Flight Review server (null if not uploaded)
+  flight_modes: string[]; // Auto-extracted flight modes from ULog
   created_at: string; // ISO datetime string
   updated_at: string; // ISO datetime string
   tags: Tag[];
@@ -80,6 +82,7 @@ export interface LogListParams {
   drone_model?: string; // Comma-separated DroneModel values
   pilot?: string;
   tags?: string; // Comma-separated tag names
+  flight_modes?: string; // Comma-separated flight mode names
   date_from?: string; // ISO date
   date_to?: string; // ISO date
 }
@@ -92,4 +95,5 @@ export interface ExtractedMetadata {
   drone_model: string | null; // S1, CX10, XLT, or "unknown"
   takeoff_lat: number | null;
   takeoff_lon: number | null;
+  flight_modes: string[]; // Auto-extracted flight modes from ULog
 }

@@ -5,8 +5,9 @@ import os
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import func, or_
@@ -24,7 +25,7 @@ router = APIRouter(prefix="/api/logs", tags=["logs"])
 @router.get("", response_model=PaginatedResponse[FlightLogResponse])
 async def list_logs(
     page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
-    per_page: Literal[25, 50, 100] = Query(default=25, description="Items per page"),
+    per_page: int = Query(default=25, description="Items per page (25, 50, or 100)"),
     search: Optional[str] = Query(
         default=None, description="Search in title, pilot, comment, serial_number"
     ),
@@ -34,6 +35,9 @@ async def list_logs(
     pilot: Optional[str] = Query(default=None, description="Exact pilot name match"),
     tags: Optional[str] = Query(
         default=None, description="Comma-separated tag names"
+    ),
+    flight_modes: Optional[str] = Query(
+        default=None, description="Comma-separated flight mode names"
     ),
     date_from: Optional[datetime] = Query(
         default=None, description="Filter logs from this date (ISO format)"
@@ -55,6 +59,10 @@ async def list_logs(
     - date_from: ISO date to filter logs from
     - date_to: ISO date to filter logs up to
     """
+    # Validate per_page
+    if per_page not in (25, 50, 100):
+        per_page = 25
+
     query = db.query(FlightLog)
 
     # Apply search filter (case-insensitive)
@@ -93,6 +101,20 @@ async def list_logs(
             for tag_name in tag_names:
                 query = query.filter(
                     FlightLog.tags.any(Tag.name == tag_name)
+                )
+
+    # Apply flight_modes filter (logs must contain ALL specified modes)
+    if flight_modes:
+        mode_names = [m.strip() for m in flight_modes.split(",") if m.strip()]
+        if mode_names:
+            # For SQLite JSON, use JSON_EACH to check if mode exists in the array
+            from sqlalchemy import text
+            for mode_name in mode_names:
+                # Check if the JSON array contains the mode using SQLite json_each
+                query = query.filter(
+                    text(
+                        "EXISTS (SELECT 1 FROM json_each(flight_logs.flight_modes) WHERE json_each.value = :mode)"
+                    ).bindparams(mode=mode_name)
                 )
 
     # Apply date range filters
@@ -205,6 +227,7 @@ async def create_log(
         flight_date=metadata.get("flight_date"),
         takeoff_lat=metadata.get("takeoff_lat"),
         takeoff_lon=metadata.get("takeoff_lon"),
+        flight_modes=metadata.get("flight_modes", []),
         tags=tag_objects,
     )
 
@@ -348,3 +371,103 @@ async def get_log_parameters(
         )
 
     return get_parameters(file_path)
+
+
+FLIGHT_REVIEW_URL = "http://10.0.0.100:5006"
+
+
+@router.post("/{log_id}/upload-to-flight-review")
+async def upload_to_flight_review(
+    log_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    """
+    Upload a flight log to the Flight Review server.
+
+    If already uploaded, returns the existing URL.
+    Otherwise uploads the file and stores the flight_review_id.
+    """
+    flight_log = db.query(FlightLog).filter(FlightLog.id == log_id).first()
+    if flight_log is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Flight log with id '{log_id}' not found",
+        )
+
+    # If already uploaded, return existing URL
+    if flight_log.flight_review_id:
+        return {
+            "flight_review_id": flight_log.flight_review_id,
+            "url": f"{FLIGHT_REVIEW_URL}/plot_app?log={flight_log.flight_review_id}",
+        }
+
+    # Check file exists
+    file_path = Path(flight_log.file_path)
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found on disk",
+        )
+
+    # Upload to Flight Review
+    try:
+        import re
+
+        # Don't follow redirects - Flight Review returns 302 with Location header
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as client:
+            with open(file_path, "rb") as f:
+                files = {"filearg": (file_path.name, f, "application/octet-stream")}
+                data = {
+                    "description": flight_log.title or "",
+                    "feedback": "",
+                    "email": "noreply@airolog.local",
+                    "type": "flightreport",  # "flightreport" = public, "personal" = private
+                    "public": "true",
+                }
+                response = await client.post(
+                    f"{FLIGHT_REVIEW_URL}/upload",
+                    files=files,
+                    data=data,
+                )
+
+        # Flight Review returns 302 redirect with Location header containing the log URL
+        flight_review_id = None
+
+        if response.status_code == 302:
+            # Extract log ID from Location header like "/plot_app?log=XXXXXXXX"
+            location = response.headers.get("location", "")
+            match = re.search(r"log=([a-zA-Z0-9_-]+)", location)
+            if match:
+                flight_review_id = match.group(1)
+        elif response.status_code == 200:
+            # Some versions might return 200 with JSON body
+            response_text = response.text
+            match = re.search(r"log=([a-zA-Z0-9_-]+)", response_text)
+            if match:
+                flight_review_id = match.group(1)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Flight Review upload failed (HTTP {response.status_code}): {response.text[:500]}",
+            )
+
+        if not flight_review_id:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Could not parse Flight Review response. Status: {response.status_code}, Headers: {dict(response.headers)}",
+            )
+
+        # Store the flight_review_id
+        flight_log.flight_review_id = flight_review_id
+        db.commit()
+
+        return {
+            "flight_review_id": flight_review_id,
+            "url": f"{FLIGHT_REVIEW_URL}/plot_app?log={flight_review_id}",
+        }
+
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to Flight Review server: {str(e)}",
+        )

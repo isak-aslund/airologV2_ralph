@@ -42,3 +42,28 @@ def init_db() -> None:
 
     # Create all tables
     Base.metadata.create_all(bind=engine)
+
+    # Run migrations for new columns
+    _run_migrations()
+
+
+def _run_migrations() -> None:
+    """Run simple migrations to add missing columns to existing tables."""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        # Check if flight_review_id column exists in flight_logs table
+        result = conn.execute(text("PRAGMA table_info(flight_logs)"))
+        columns = [row[1] for row in result.fetchall()]
+
+        if "flight_review_id" not in columns:
+            conn.execute(
+                text("ALTER TABLE flight_logs ADD COLUMN flight_review_id VARCHAR(100)")
+            )
+            conn.commit()
+
+        if "flight_modes" not in columns:
+            conn.execute(
+                text("ALTER TABLE flight_logs ADD COLUMN flight_modes TEXT DEFAULT '[]'")
+            )
+            conn.commit()

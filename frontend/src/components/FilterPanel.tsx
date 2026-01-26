@@ -5,12 +5,20 @@ import type { DroneModel, Tag } from '../types'
 
 const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
 
+// Available flight modes (matching backend FLIGHT_MODES)
+const FLIGHT_MODES = [
+  'Manual', 'Altitude', 'Position', 'Mission', 'Loiter',
+  'Return to Land', 'Acro', 'Descend', 'Offboard', 'Stabilized',
+  'Takeoff', 'Land', 'Follow Target', 'Precision Land', 'Orbit',
+]
+
 export interface FilterState {
   dateFrom: string
   dateTo: string
   droneModels: DroneModel[]
   pilot: string
   tags: string[]
+  flightModes: string[]
 }
 
 interface FilterPanelProps {
@@ -33,6 +41,9 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
   const [tagDropdownOpen, setTagDropdownOpen] = useState(false)
   const [tagSearch, setTagSearch] = useState('')
   const tagDropdownRef = useRef<HTMLDivElement>(null)
+  const [modeDropdownOpen, setModeDropdownOpen] = useState(false)
+  const [modeSearch, setModeSearch] = useState('')
+  const modeDropdownRef = useRef<HTMLDivElement>(null)
 
   // Fetch pilots list on mount
   useEffect(() => {
@@ -71,6 +82,9 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     function handleClickOutside(event: MouseEvent) {
       if (tagDropdownRef.current && !tagDropdownRef.current.contains(event.target as Node)) {
         setTagDropdownOpen(false)
+      }
+      if (modeDropdownRef.current && !modeDropdownRef.current.contains(event.target as Node)) {
+        setModeDropdownOpen(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -126,6 +140,24 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     })
   }
 
+  function handleModeToggle(modeName: string) {
+    const isSelected = filters.flightModes.includes(modeName)
+    const newModes = isSelected
+      ? filters.flightModes.filter((m) => m !== modeName)
+      : [...filters.flightModes, modeName]
+    onFilterChange({
+      ...filters,
+      flightModes: newModes,
+    })
+  }
+
+  function handleRemoveMode(modeName: string) {
+    onFilterChange({
+      ...filters,
+      flightModes: filters.flightModes.filter((m) => m !== modeName),
+    })
+  }
+
   function handleClearAll() {
     onFilterChange({
       dateFrom: '',
@@ -133,6 +165,7 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
       droneModels: [],
       pilot: '',
       tags: [],
+      flightModes: [],
     })
   }
 
@@ -141,13 +174,19 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     tag.name.toLowerCase().includes(tagSearch.toLowerCase())
   )
 
+  // Filter flight modes based on search input
+  const filteredModes = FLIGHT_MODES.filter((mode) =>
+    mode.toLowerCase().includes(modeSearch.toLowerCase())
+  )
+
   // Check if any filters are active
   const hasActiveFilters =
     filters.dateFrom !== '' ||
     filters.dateTo !== '' ||
     filters.droneModels.length > 0 ||
     filters.pilot !== '' ||
-    filters.tags.length > 0
+    filters.tags.length > 0 ||
+    filters.flightModes.length > 0
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg mb-4">
@@ -193,7 +232,7 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
       {/* Collapsible filter content */}
       {isExpanded && (
         <div className="px-4 pb-4 border-t border-gray-200">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mt-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mt-4">
             {/* Date range - From */}
             <div>
               <label htmlFor="date-from" className="block text-sm font-medium text-gray-700 mb-1">
@@ -324,6 +363,69 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
                 </div>
               )}
             </div>
+
+            {/* Flight Modes filter with multi-select dropdown */}
+            <div ref={modeDropdownRef} className="relative">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Flight Modes</label>
+              <button
+                type="button"
+                onClick={() => setModeDropdownOpen(!modeDropdownOpen)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent flex items-center justify-between"
+              >
+                <span className={filters.flightModes.length === 0 ? 'text-gray-500' : ''}>
+                  {filters.flightModes.length === 0
+                    ? 'Select modes...'
+                    : `${filters.flightModes.length} mode${filters.flightModes.length > 1 ? 's' : ''} selected`}
+                </span>
+                <svg
+                  className={`h-5 w-5 text-gray-400 transition-transform ${modeDropdownOpen ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {/* Dropdown menu */}
+              {modeDropdownOpen && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-hidden">
+                  {/* Search input in dropdown */}
+                  <div className="p-2 border-b border-gray-200">
+                    <input
+                      type="text"
+                      placeholder="Search modes..."
+                      value={modeSearch}
+                      onChange={(e) => setModeSearch(e.target.value)}
+                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  {/* Mode list */}
+                  <div className="max-h-40 overflow-y-auto">
+                    {filteredModes.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-gray-500">
+                        No matching modes
+                      </div>
+                    ) : (
+                      filteredModes.map((mode) => (
+                        <label
+                          key={mode}
+                          className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={filters.flightModes.includes(mode)}
+                            onChange={() => handleModeToggle(mode)}
+                            className="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                          />
+                          <span className="text-sm text-gray-700">{mode}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Selected tags as removable chips */}
@@ -339,6 +441,29 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
                     type="button"
                     onClick={() => handleRemoveTag(tagName)}
                     className="hover:bg-blue-200 rounded-full p-0.5"
+                  >
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Selected flight modes as removable chips */}
+          {filters.flightModes.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {filters.flightModes.map((modeName) => (
+                <span
+                  key={modeName}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-sm bg-indigo-100 text-indigo-800 rounded-full"
+                >
+                  {modeName}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveMode(modeName)}
+                    className="hover:bg-indigo-200 rounded-full p-0.5"
                   >
                     <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

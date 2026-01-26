@@ -70,6 +70,8 @@ class FlightLogResponse(BaseModel):
     takeoff_lat: Optional[float]
     takeoff_lon: Optional[float]
     flight_date: Optional[datetime]
+    flight_review_id: Optional[str]
+    flight_modes: list[str]
     created_at: datetime
     updated_at: datetime
     tags: list[TagResponse]
@@ -105,3 +107,4 @@ class ExtractedMetadataResponse(BaseModel):
     drone_model: Optional[str]
     takeoff_lat: Optional[float]
     takeoff_lon: Optional[float]
+    flight_modes: list[str]

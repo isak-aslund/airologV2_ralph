@@ -53,6 +53,15 @@ export default function ActiveFilterChips({ filters, onRemoveFilter }: ActiveFil
     })
   }
 
+  // Flight mode chips (one per selected mode)
+  for (const mode of filters.flightModes) {
+    chips.push({
+      label: `Mode: ${mode}`,
+      type: 'flightModes',
+      value: mode,
+    })
+  }
+
   // Don't render anything if no active filters
   if (chips.length === 0) {
     return null

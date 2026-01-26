@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Table, Text
+from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, JSON, String, Table, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.database import Base
@@ -67,6 +67,8 @@ class FlightLog(Base):
     takeoff_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     takeoff_lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     flight_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    flight_review_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    flight_modes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
