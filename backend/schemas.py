@@ -102,5 +102,6 @@ class ExtractedMetadataResponse(BaseModel):
     duration_seconds: Optional[float]
     flight_date: Optional[datetime]
     serial_number: Optional[str]
+    drone_model: Optional[str]
     takeoff_lat: Optional[float]
     takeoff_lon: Optional[float]

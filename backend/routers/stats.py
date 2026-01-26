@@ -104,8 +104,8 @@ async def extract_file_metadata(
         temp_file.write(content)
         temp_file.close()
 
-        # Extract metadata
-        metadata = extract_metadata(temp_file.name)
+        # Extract metadata (pass original filename for date parsing fallback)
+        metadata = extract_metadata(temp_file.name, original_filename=file.filename)
 
         return metadata
     except Exception as e:

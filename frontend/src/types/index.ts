@@ -89,6 +89,7 @@ export interface ExtractedMetadata {
   duration_seconds: number | null;
   flight_date: string | null; // ISO datetime string
   serial_number: string | null;
+  drone_model: string | null; // S1, CX10, XLT, or "unknown"
   takeoff_lat: number | null;
   takeoff_lon: number | null;
 }

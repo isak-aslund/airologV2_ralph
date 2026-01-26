@@ -14,12 +14,12 @@ def _parse_date_from_filename(filename: str) -> datetime | None:
     Try to extract a date from a ULog filename.
 
     Common patterns:
-    - log_X_YYYY-MM-DD-HH-MM-SS.ulg
+    - log_X_YYYY-MM-DD-HH-MM-SS.ulg (with 1 or 2 digit month/day/time)
     - YYYY-MM-DD_HH-MM-SS.ulg
     - YYYYMMDD_HHMMSS.ulg
     """
-    # Pattern 1: log_X_YYYY-MM-DD-HH-MM-SS
-    match = re.search(r"(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})", filename)
+    # Pattern 1: log_X_YYYY-M-D-H-M-S (allows 1 or 2 digits for month/day/time)
+    match = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})-(\d{1,2})-(\d{1,2})-(\d{1,2})", filename)
     if match:
         try:
             return datetime(
@@ -33,8 +33,8 @@ def _parse_date_from_filename(filename: str) -> datetime | None:
         except ValueError:
             pass
 
-    # Pattern 2: YYYY-MM-DD_HH-MM-SS
-    match = re.search(r"(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})", filename)
+    # Pattern 2: YYYY-MM-DD_HH-MM-SS (allows 1 or 2 digits for month/day/time)
+    match = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})_(\d{1,2})-(\d{1,2})-(\d{1,2})", filename)
     if match:
         try:
             return datetime(
@@ -48,7 +48,7 @@ def _parse_date_from_filename(filename: str) -> datetime | None:
         except ValueError:
             pass
 
-    # Pattern 3: YYYYMMDD_HHMMSS
+    # Pattern 3: YYYYMMDD_HHMMSS (strict 2 digits required for compact format)
     match = re.search(r"(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})", filename)
     if match:
         try:
@@ -91,6 +91,7 @@ def extract_metadata(
             "duration_seconds": None,
             "flight_date": None,
             "serial_number": None,
+            "drone_model": None,
             "takeoff_lat": None,
             "takeoff_lon": None,
         }
@@ -106,22 +107,40 @@ def extract_metadata(
     except Exception:
         pass
 
-    # Get flight date from start timestamp + time_ref_utc
-    # Fall back to parsing original filename if time_ref_utc not available
+    # Get flight date from GPS UTC time or time_ref_utc
+    # Priority: GPS time_utc_usec > time_ref_utc (if valid) > filename parsing
     flight_date: datetime | None = None
-    try:
-        start_ts = ulog.start_timestamp
-        time_ref_utc = ulog.msg_info_dict.get("time_ref_utc", 0)
 
-        if time_ref_utc and time_ref_utc > 0 and start_ts is not None:
-            # time_ref_utc is the UTC timestamp offset to add to boot-relative timestamps
-            # Both are in microseconds
-            absolute_time_us = start_ts + time_ref_utc
-            flight_date = datetime.fromtimestamp(absolute_time_us / 1_000_000.0)
+    # Minimum valid timestamp: year 2000 in microseconds (946684800 seconds)
+    MIN_VALID_TIMESTAMP_US = 946684800 * 1_000_000
+
+    # Source 1: Try GPS time_utc_usec field (most reliable)
+    try:
+        for ds in ulog.data_list:
+            if ds.name in ("sensor_gps", "vehicle_gps_position"):
+                if "time_utc_usec" in ds.data:
+                    times = ds.data["time_utc_usec"]
+                    # Find first valid (non-zero, reasonable) timestamp
+                    for t in times:
+                        if t > MIN_VALID_TIMESTAMP_US:
+                            flight_date = datetime.fromtimestamp(t / 1_000_000.0)
+                            break
+                if flight_date:
+                    break
     except Exception:
         pass
 
-    # Fallback: try to parse date from original filename
+    # Source 2: Try time_ref_utc (only if it's a valid timestamp, not just seconds)
+    if flight_date is None:
+        try:
+            time_ref_utc = ulog.msg_info_dict.get("time_ref_utc", 0)
+            # Only use if it looks like a valid microsecond timestamp (after year 2000)
+            if time_ref_utc and time_ref_utc > MIN_VALID_TIMESTAMP_US:
+                flight_date = datetime.fromtimestamp(time_ref_utc / 1_000_000.0)
+        except Exception:
+            pass
+
+    # Source 3: Fallback to parsing date from original filename
     if flight_date is None and original_filename:
         flight_date = _parse_date_from_filename(original_filename)
 
@@ -131,6 +150,22 @@ def extract_metadata(
         params = ulog.initial_parameters
         if "AIROLIT_SERIAL" in params:
             serial_number = str(params["AIROLIT_SERIAL"])
+    except Exception:
+        pass
+
+    # Get drone model from SYS_AUTOSTART parameter
+    # S1 = 4010, CX10 = 4030, XLT = 4006
+    drone_model: str | None = None
+    try:
+        params = ulog.initial_parameters
+        if "SYS_AUTOSTART" in params:
+            autostart = int(params["SYS_AUTOSTART"])
+            autostart_to_model = {
+                4010: "S1",
+                4030: "CX10",
+                4006: "XLT",
+            }
+            drone_model = autostart_to_model.get(autostart, "unknown")
     except Exception:
         pass
 
@@ -201,6 +236,7 @@ def extract_metadata(
         "duration_seconds": duration_seconds,
         "flight_date": flight_date,
         "serial_number": serial_number,
+        "drone_model": drone_model,
         "takeoff_lat": takeoff_lat,
         "takeoff_lon": takeoff_lon,
     }

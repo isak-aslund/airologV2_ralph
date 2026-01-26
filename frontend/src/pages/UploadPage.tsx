@@ -290,6 +290,33 @@ export default function UploadPage() {
     extractAll()
   }, [selectedFiles, fileMetadataStates])
 
+  // Prepopulate drone model from extracted metadata
+  useEffect(() => {
+    // Only prepopulate if drone_model is not already set
+    if (formData.drone_model) return
+
+    // For single file, use the metadata state
+    if (selectedFiles.length === 1 && metadata?.drone_model) {
+      const model = metadata.drone_model
+      // Only set if it's a valid known model (not "unknown")
+      if (model === 'S1' || model === 'CX10' || model === 'XLT') {
+        setFormData(prev => ({ ...prev, drone_model: model }))
+      }
+      return
+    }
+
+    // For multiple files, use the first file's metadata as default
+    if (selectedFiles.length > 1) {
+      const firstFileMetadata = fileMetadataStates.get(selectedFiles[0]?.name)?.metadata
+      if (firstFileMetadata?.drone_model) {
+        const model = firstFileMetadata.drone_model
+        if (model === 'S1' || model === 'CX10' || model === 'XLT') {
+          setFormData(prev => ({ ...prev, drone_model: model }))
+        }
+      }
+    }
+  }, [metadata, fileMetadataStates, selectedFiles, formData.drone_model])
+
   // Validate required form fields
   const validateForm = useCallback((): boolean => {
     const errors: FormErrors = {}
@@ -1279,8 +1306,8 @@ export default function UploadPage() {
         )}
       </div>
 
-      {/* Metadata Extraction Section */}
-      {selectedFiles.length > 0 && (
+      {/* Metadata Extraction Section - Single file only */}
+      {selectedFiles.length === 1 && (
         <div className="mt-8 p-6 bg-white rounded-lg border border-gray-200">
           {isExtracting ? (
             // Loading State
@@ -1605,6 +1632,76 @@ export default function UploadPage() {
               </div>
             </div>
           ) : null}
+        </div>
+      )}
+
+      {/* Batch Upload Section - Multiple files only */}
+      {selectedFiles.length > 1 && (
+        <div className="mt-6 p-6 bg-white rounded-lg border border-gray-200">
+          {/* Error Message */}
+          {uploadError && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+              <div className="flex items-start gap-3">
+                <svg
+                  className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-red-800">Upload failed</p>
+                  <p className="text-sm text-red-700 mt-1">{uploadError}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Batch Upload Button */}
+          <button
+            type="button"
+            onClick={handleBatchUpload}
+            disabled={!isBatchUploadValid || isBatchUploading}
+            className={`w-full py-3 px-4 text-white font-semibold rounded-md transition-colors flex items-center justify-center gap-2 ${
+              isBatchUploadValid && !isBatchUploading
+                ? 'bg-blue-600 hover:bg-blue-700'
+                : 'bg-gray-400 cursor-not-allowed'
+            }`}
+          >
+            {isBatchUploading ? (
+              <>
+                <svg
+                  className="animate-spin h-5 w-5 text-white"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+                Uploading {batchUploadIndex + 1} of {selectedFiles.length}...
+              </>
+            ) : (
+              `Upload All (${selectedFiles.length} files)`
+            )}
+          </button>
         </div>
       )}
     </div>
