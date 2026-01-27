@@ -14,14 +14,63 @@ interface FormData {
   title: string
   pilot: string
   drone_model: string  // Can be known model or custom value (e.g., "4001")
+  serial_number: string
   comment: string
   tags: string[]
+}
+
+// Serial number format: exactly 10 digits
+const SERIAL_NUMBER_REGEX = /^\d{10}$/
+
+// Check if serial number has valid format (10 digits)
+const isValidSerialFormat = (serial: string | null | undefined): boolean => {
+  if (!serial) return false
+  return SERIAL_NUMBER_REGEX.test(serial.trim())
+}
+
+// Default serial numbers that should not be prefilled
+// Pattern: 16925X0000 (where X is 0-9) or 0
+const isDefaultSerialNumber = (serial: string | null | undefined): boolean => {
+  if (!serial) return false
+  const trimmed = serial.trim()
+  if (trimmed === '0') return true
+  // Pattern: 16925X0000 where X is a digit (0-9)
+  return /^16925\d0000$/.test(trimmed)
+}
+
+// Get human-readable label for default serial type
+const getDefaultSerialLabel = (serial: string): string => {
+  if (serial === '0') return 'Generic default'
+  if (serial === '1692500000') return 'XLT default'
+  if (serial === '1692520000') return 'S1 default'
+  if (serial === '1692510000') return 'CX10 default'
+  if (/^16925\d0000$/.test(serial)) return 'Factory default'
+  return 'Default value'
+}
+
+// Get validation error message for serial number
+const getSerialValidationError = (serial: string | null | undefined): string | null => {
+  if (!serial || !serial.trim()) {
+    return 'Serial number is required'
+  }
+  const trimmed = serial.trim()
+  if (!/^\d+$/.test(trimmed)) {
+    return 'Serial number must contain only digits (0-9)'
+  }
+  if (trimmed.length !== 10) {
+    return `Serial number must be exactly 10 digits (currently ${trimmed.length})`
+  }
+  if (isDefaultSerialNumber(trimmed)) {
+    return 'This is a model default serial number'
+  }
+  return null
 }
 
 interface FormErrors {
   title?: string
   pilot?: string
   drone_model?: string
+  serial_number?: string
 }
 
 // Per-file override data
@@ -29,6 +78,7 @@ interface FileOverride {
   title: string  // Pre-populated from filename (without .ulg)
   pilot: string  // Optional override for pilot
   drone_model: string  // Optional override for drone model (can be custom)
+  serial_number: string  // Serial number (required)
   comment: string  // Optional comment
   tags: string[]  // Optional tags
 }
@@ -84,6 +134,7 @@ export default function UploadPage() {
     title: '',
     pilot: '',
     drone_model: '',
+    serial_number: '',
     comment: '',
     tags: [],
   })
@@ -154,6 +205,7 @@ export default function UploadPage() {
       title: getTitleFromFilename(filename),
       pilot: '',
       drone_model: '',
+      serial_number: '',
       comment: '',
       tags: [],
     }
@@ -340,8 +392,38 @@ export default function UploadPage() {
     }
   }, [metadata, fileMetadataStates, selectedFiles, formData.drone_model])
 
-  // Check if upload is valid (defaults set + files selected)
-  const isBatchUploadValid = formData.pilot.trim() && formData.drone_model && selectedFiles.length > 0
+  // Get effective serial number for a file (considering override, metadata, and default)
+  const getEffectiveSerialNumber = (filename: string): string => {
+    const override = getFileOverride(filename)
+    const fileMetadata = fileMetadataStates.get(filename)?.metadata
+
+    // Priority: 1. File override, 2. Metadata (if not default), 3. Default form value
+    if (override.serial_number.trim()) {
+      return override.serial_number.trim()
+    }
+    if (fileMetadata?.serial_number && !isDefaultSerialNumber(fileMetadata.serial_number)) {
+      return fileMetadata.serial_number
+    }
+    return formData.serial_number.trim()
+  }
+
+  // Check if a file has a valid serial number (correct format and not a default)
+  const hasValidSerialNumber = (filename: string): boolean => {
+    const serial = getEffectiveSerialNumber(filename)
+    return isValidSerialFormat(serial) && !isDefaultSerialNumber(serial)
+  }
+
+  // Get validation error for a file's serial number
+  const getFileSerialError = (filename: string): string | null => {
+    const serial = getEffectiveSerialNumber(filename)
+    return getSerialValidationError(serial)
+  }
+
+  // Check if all files have valid serial numbers
+  const allFilesHaveValidSerialNumbers = selectedFiles.every(file => hasValidSerialNumber(file.name))
+
+  // Check if upload is valid (defaults set + files selected + all have valid serial numbers)
+  const isBatchUploadValid = formData.pilot.trim() && formData.drone_model && selectedFiles.length > 0 && allFilesHaveValidSerialNumbers
 
   // Handle batch upload submission (for multiple files)
   const handleBatchUpload = async () => {
@@ -362,7 +444,6 @@ export default function UploadPage() {
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i]
       const override = getFileOverride(file.name)
-      const fileMetadata = fileMetadataStates.get(file.name)?.metadata
 
       // Update current file index and status
       setBatchUploadIndex(i)
@@ -393,10 +474,9 @@ export default function UploadPage() {
           uploadData.append('comment', comment)
         }
 
-        // Serial number from metadata if available
-        if (fileMetadata?.serial_number) {
-          uploadData.append('serial_number', fileMetadata.serial_number)
-        }
+        // Serial number (required) - use effective serial number
+        const serialNumber = getEffectiveSerialNumber(file.name)
+        uploadData.append('serial_number', serialNumber)
 
         // Tags: per-file override or default
         const tags = override.tags.length > 0 ? override.tags : formData.tags
@@ -449,7 +529,6 @@ export default function UploadPage() {
   // Retry upload for a single failed file
   const handleRetryFile = async (file: File) => {
     const override = getFileOverride(file.name)
-    const fileMetadata = fileMetadataStates.get(file.name)?.metadata
 
     // Mark as uploading
     setFileUploadStatuses(prev => {
@@ -479,10 +558,9 @@ export default function UploadPage() {
         uploadData.append('comment', comment)
       }
 
-      // Serial number from metadata if available
-      if (fileMetadata?.serial_number) {
-        uploadData.append('serial_number', fileMetadata.serial_number)
-      }
+      // Serial number (required) - use effective serial number
+      const serialNumber = getEffectiveSerialNumber(file.name)
+      uploadData.append('serial_number', serialNumber)
 
       // Tags: per-file override or default
       const tags = override.tags.length > 0 ? override.tags : formData.tags
@@ -675,6 +753,7 @@ export default function UploadPage() {
         title: '',
         pilot: '',
         drone_model: '',
+        serial_number: '',
         comment: '',
         tags: [],
       })
@@ -697,6 +776,7 @@ export default function UploadPage() {
       title: '',
       pilot: '',
       drone_model: '',
+      serial_number: '',
       comment: '',
       tags: [],
     })
@@ -814,6 +894,46 @@ export default function UploadPage() {
               )}
             </div>
           </div>
+
+          {/* Serial Number - only show if files need it */}
+          {selectedFiles.some(file => {
+            const fileMetadata = fileMetadataStates.get(file.name)?.metadata
+            const override = getFileOverride(file.name)
+            // Show default serial field if any file needs a serial number
+            // (no override, and either no metadata serial or metadata serial is a default)
+            return !override.serial_number.trim() &&
+              (!fileMetadata?.serial_number || isDefaultSerialNumber(fileMetadata.serial_number))
+          }) && (
+            <div className="mt-4">
+              <label htmlFor="default-serial-number" className="block text-sm font-medium text-gray-700 mb-1">
+                Default Serial Number <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                id="default-serial-number"
+                value={formData.serial_number}
+                onChange={(e) => handleFormChange('serial_number', e.target.value)}
+                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  formData.serial_number && getSerialValidationError(formData.serial_number)
+                    ? 'border-amber-400 bg-amber-50'
+                    : formData.serial_number && !getSerialValidationError(formData.serial_number)
+                      ? 'border-green-400 bg-green-50'
+                      : 'border-gray-300'
+                }`}
+                placeholder="e.g. 1234567890"
+                maxLength={10}
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Must be exactly 10 digits. Used for files without a valid AIROLIT_SERIAL in metadata.
+              </p>
+              {formData.serial_number && getSerialValidationError(formData.serial_number) && (
+                <p className="mt-1 text-sm text-amber-600">{getSerialValidationError(formData.serial_number)}</p>
+              )}
+              {formData.serial_number && !getSerialValidationError(formData.serial_number) && (
+                <p className="mt-1 text-sm text-green-600">Valid serial number</p>
+              )}
+            </div>
+          )}
 
           {/* Comment */}
           <div className="mt-4">
@@ -1016,6 +1136,14 @@ export default function UploadPage() {
                             {uploadStatus?.status === 'error' && (
                               <span className="text-xs text-red-600 font-medium" title={uploadStatus.error}>Failed</span>
                             )}
+                            {!uploadStatus && !hasValidSerialNumber(file.name) && (
+                              <span className="inline-flex items-center gap-0.5 text-xs text-amber-600 font-medium" title="Serial number required">
+                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                                No S/N
+                              </span>
+                            )}
                           </div>
                           <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
                           {uploadStatus?.status === 'error' && (
@@ -1087,12 +1215,21 @@ export default function UploadPage() {
                                   </span>
                                 )}
                                 {fileMetadata.serial_number !== null && (
-                                  <span className="inline-flex items-center gap-1">
-                                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                                    </svg>
-                                    {fileMetadata.serial_number}
-                                  </span>
+                                  isDefaultSerialNumber(fileMetadata.serial_number) ? (
+                                    <span className="inline-flex items-center gap-1 text-amber-600" title={`AIROLIT_SERIAL=${fileMetadata.serial_number} is a model default. Each drone must have a unique serial number. Update the PX4 AIROLIT_SERIAL parameter or enter one manually.`}>
+                                      <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                      </svg>
+                                      S/N: {fileMetadata.serial_number} ({getDefaultSerialLabel(fileMetadata.serial_number)})
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1">
+                                      <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                                      </svg>
+                                      S/N: {fileMetadata.serial_number}
+                                    </span>
+                                  )
                                 )}
                                 {fileMetadata.takeoff_lat !== null && fileMetadata.takeoff_lon !== null && (
                                   <span className="inline-flex items-center gap-1">
@@ -1200,6 +1337,53 @@ export default function UploadPage() {
                                 )}
                               </select>
                             </div>
+                          </div>
+
+                          {/* Serial Number */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">
+                              Serial Number <span className="text-red-500">*</span>
+                              {fileMetadata?.serial_number && !isDefaultSerialNumber(fileMetadata.serial_number) && (
+                                <span className="text-gray-400 font-normal ml-1">(from metadata)</span>
+                              )}
+                            </label>
+                            {fileMetadata?.serial_number && isDefaultSerialNumber(fileMetadata.serial_number) && (
+                              <div className="mb-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+                                <div className="flex items-start gap-1.5">
+                                  <svg className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                  </svg>
+                                  <div>
+                                    <span className="font-medium">AIROLIT_SERIAL={fileMetadata.serial_number}</span> is a model default ({getDefaultSerialLabel(fileMetadata.serial_number)}).
+                                    <br />
+                                    Each drone must have a unique serial number. Please update the PX4 <code className="bg-amber-100 px-1 rounded">AIROLIT_SERIAL</code> parameter to a unique value, or enter one manually below.
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            <input
+                              type="text"
+                              value={override.serial_number}
+                              onChange={(e) => updateFileOverride(file.name, 'serial_number', e.target.value)}
+                              className={`w-full px-3 py-1.5 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                !hasValidSerialNumber(file.name) ? 'border-amber-400 bg-amber-50' : 'border-gray-300'
+                              }`}
+                              placeholder={
+                                fileMetadata?.serial_number && !isDefaultSerialNumber(fileMetadata.serial_number)
+                                  ? fileMetadata.serial_number
+                                  : formData.serial_number || 'Enter serial number'
+                              }
+                            />
+                            {!hasValidSerialNumber(file.name) && (
+                              <p className="mt-1 text-xs text-amber-600">
+                                {getFileSerialError(file.name) || 'Serial number required'}
+                              </p>
+                            )}
+                            {hasValidSerialNumber(file.name) && (
+                              <p className="mt-1 text-xs text-green-600">
+                                Valid serial number
+                              </p>
+                            )}
                           </div>
 
                           {/* Comment override */}
@@ -1336,6 +1520,37 @@ export default function UploadPage() {
       {/* Upload Section */}
       {selectedFiles.length > 0 && (
         <div className="mt-6 p-6 bg-white rounded-lg border border-gray-200">
+          {/* Validation warnings */}
+          {!allFilesHaveValidSerialNumbers && selectedFiles.length > 0 && (
+            <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-md">
+              <div className="flex items-start gap-3">
+                <svg
+                  className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-amber-800">Valid serial number required</p>
+                  <p className="text-sm text-amber-700 mt-1">
+                    {selectedFiles.filter(f => !hasValidSerialNumber(f.name)).length} file(s) need a valid serial number.
+                    Serial numbers must be exactly 10 digits and not a model default.
+                  </p>
+                  <p className="text-sm text-amber-700 mt-1">
+                    Expand the file(s) to enter a serial number, or set a default serial number above.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Error Message */}
           {uploadError && (
             <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">

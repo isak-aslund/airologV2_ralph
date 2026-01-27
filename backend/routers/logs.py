@@ -155,6 +155,45 @@ def get_or_create_tags(db: Session, tag_names: list[str]) -> list[Tag]:
     return tags
 
 
+import re
+
+# Serial number must be exactly 10 digits
+SERIAL_NUMBER_REGEX = re.compile(r"^\d{10}$")
+
+
+def is_valid_serial_format(serial: str | None) -> bool:
+    """Check if serial number has valid format (exactly 10 digits)."""
+    if not serial:
+        return False
+    return bool(SERIAL_NUMBER_REGEX.match(serial.strip()))
+
+
+def is_default_serial_number(serial: str | None) -> bool:
+    """Check if serial number is a default value that should be rejected."""
+    if not serial:
+        return False
+    trimmed = serial.strip()
+    if trimmed == "0":
+        return True
+    # Pattern: 16925X0000 where X is a digit (0-9)
+    # Matches: 1692500000 (XLT), 1692510000 (CX10), 1692520000 (S1), etc.
+    return bool(re.match(r"^16925\d0000$", trimmed))
+
+
+def validate_serial_number(serial: str | None) -> str | None:
+    """Validate serial number and return error message if invalid, None if valid."""
+    if not serial or not serial.strip():
+        return "Serial number is required"
+    trimmed = serial.strip()
+    if not trimmed.isdigit():
+        return "Serial number must contain only digits (0-9)"
+    if len(trimmed) != 10:
+        return f"Serial number must be exactly 10 digits (got {len(trimmed)})"
+    if is_default_serial_number(trimmed):
+        return "This is a model default serial number and cannot be used"
+    return None
+
+
 @router.post("", response_model=FlightLogResponse, status_code=status.HTTP_201_CREATED)
 async def create_log(
     file: UploadFile = File(...),
@@ -200,6 +239,22 @@ async def create_log(
     # Extract metadata from the file
     metadata = extract_metadata(file_path, original_filename=file.filename)
 
+    # Determine final serial number (form value or metadata fallback)
+    final_serial_number = serial_number or metadata.get("serial_number")
+
+    # Validate serial number format and value
+    serial_error = validate_serial_number(final_serial_number)
+    if serial_error:
+        # Clean up the file we just saved
+        try:
+            file_path.unlink()
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid serial number: {serial_error}. Serial numbers must be exactly 10 digits.",
+        )
+
     # Parse tags from comma-separated string
     tag_names: list[str] = []
     if tags:
@@ -214,7 +269,7 @@ async def create_log(
         title=title,
         pilot=pilot,
         drone_model=drone_model,
-        serial_number=serial_number or metadata.get("serial_number"),
+        serial_number=final_serial_number,
         file_path=str(file_path),
         comment=comment,
         duration_seconds=metadata.get("duration_seconds"),
