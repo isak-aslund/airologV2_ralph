@@ -13,5 +13,12 @@ export default defineConfig({
       cert: fs.readFileSync(path.resolve(__dirname, 'certs/cert.pem')),
     },
     host: true, // Listen on all network interfaces
+    proxy: {
+      '/img': {
+        target: 'https://localhost:8000',
+        changeOrigin: true,
+        secure: false, // Accept self-signed certs
+      },
+    },
   },
 })
