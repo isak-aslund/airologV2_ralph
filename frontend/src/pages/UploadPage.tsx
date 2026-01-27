@@ -520,11 +520,16 @@ export default function UploadPage() {
       total += setupData.custom.weight
     }
 
-    return total
-  }, [setupData, effectiveDroneModel])
+    // If files have different models, TOW cannot be calculated - return 0
+    if (!allFilesSameDroneModel) {
+      return 0
+    }
 
-  // Check if setup is valid (drone weight > 0 and power selected)
-  const isSetupValid = setupData.droneWeight > 0 && setupData.power !== null
+    return total
+  }, [setupData, effectiveDroneModel, allFilesSameDroneModel])
+
+  // Check if setup is valid (drone weight > 0 and power selected, or files have different models - skip setup)
+  const isSetupValid = !allFilesSameDroneModel || (setupData.droneWeight > 0 && setupData.power !== null)
 
   // Get effective serial number for a file (considering override, metadata, and default)
   const getEffectiveSerialNumber = (filename: string): string => {
@@ -1825,6 +1830,19 @@ export default function UploadPage() {
         <div className="mb-6 p-6 bg-white rounded-lg border border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Setup</h2>
 
+          {!allFilesSameDroneModel ? (
+            /* Info box when files have different models */
+            <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 px-3 py-3 rounded-md">
+              <svg className="h-5 w-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <p className="font-medium text-gray-700">Cannot calculate TOW for mixed drone models</p>
+                <p className="mt-1">Split uploads by drone model if you want to record takeoff weight.</p>
+              </div>
+            </div>
+          ) : (
+          <>
           {/* Drone Weight */}
           <div className="mb-4">
             <label htmlFor="drone-weight" className="block text-sm font-medium text-gray-700 mb-1">
@@ -2035,6 +2053,8 @@ export default function UploadPage() {
               Calculated from drone weight + power + payloads + custom items
             </p>
           </div>
+          </>
+          )}
         </div>
       )}
 
