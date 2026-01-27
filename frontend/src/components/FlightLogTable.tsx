@@ -247,6 +247,9 @@ export default function FlightLogTable({
               Duration
             </th>
             <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              TOW
+            </th>
+            <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Tags
             </th>
             <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -307,6 +310,10 @@ export default function FlightLogTable({
               {/* Duration */}
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500 font-mono">
                 {formatDuration(log.duration_seconds)}
+              </td>
+              {/* TOW */}
+              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
+                {log.tow !== null ? `${log.tow.toFixed(2)} kg` : '--'}
               </td>
               {/* Tags */}
               <td className="px-3 py-2 whitespace-nowrap">

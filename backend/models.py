@@ -70,6 +70,7 @@ class FlightLog(Base):
     flight_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     flight_review_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     flight_modes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    tow: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,

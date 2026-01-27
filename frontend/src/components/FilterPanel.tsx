@@ -17,6 +17,8 @@ export interface FilterState {
   pilot: string
   tags: string[]
   flightModes: string[]
+  towMin: string  // Minimum TOW in kg (string for input handling)
+  towMax: string  // Maximum TOW in kg (string for input handling)
 }
 
 interface FilterPanelProps {
@@ -172,6 +174,20 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     })
   }
 
+  function handleTowMinChange(e: React.ChangeEvent<HTMLInputElement>) {
+    onFilterChange({
+      ...filters,
+      towMin: e.target.value,
+    })
+  }
+
+  function handleTowMaxChange(e: React.ChangeEvent<HTMLInputElement>) {
+    onFilterChange({
+      ...filters,
+      towMax: e.target.value,
+    })
+  }
+
   function handleClearAll() {
     onFilterChange({
       dateFrom: '',
@@ -180,6 +196,8 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
       pilot: '',
       tags: [],
       flightModes: [],
+      towMin: '',
+      towMax: '',
     })
   }
 
@@ -200,7 +218,9 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     filters.droneModels.length > 0 ||
     filters.pilot !== '' ||
     filters.tags.length > 0 ||
-    filters.flightModes.length > 0
+    filters.flightModes.length > 0 ||
+    filters.towMin !== '' ||
+    filters.towMax !== ''
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg mb-4">
@@ -442,6 +462,32 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* TOW Range filter */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">TOW (kg)</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  placeholder="Min"
+                  value={filters.towMin}
+                  onChange={handleTowMinChange}
+                  step="0.1"
+                  min="0"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <span className="text-gray-500">-</span>
+                <input
+                  type="number"
+                  placeholder="Max"
+                  value={filters.towMax}
+                  onChange={handleTowMaxChange}
+                  step="0.1"
+                  min="0"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
             </div>
           </div>
 

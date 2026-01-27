@@ -34,6 +34,8 @@ function parseFiltersFromParams(searchParams: URLSearchParams): FilterState {
     pilot: searchParams.get('pilot') || '',
     tags,
     flightModes,
+    towMin: searchParams.get('tow_min') || '',
+    towMax: searchParams.get('tow_max') || '',
   }
 }
 
@@ -104,6 +106,8 @@ export default function LogListPage() {
         flight_modes: filters.flightModes.length > 0 ? filters.flightModes.join(',') : undefined,
         date_from: filters.dateFrom || undefined,
         date_to: filters.dateTo || undefined,
+        tow_min: filters.towMin ? parseFloat(filters.towMin) : undefined,
+        tow_max: filters.towMax ? parseFloat(filters.towMax) : undefined,
       })
       setLogsData(data)
     } catch (err) {
@@ -130,6 +134,8 @@ export default function LogListPage() {
       pilot: newFilters.pilot || undefined,
       tags: newFilters.tags.length > 0 ? newFilters.tags.join(',') : undefined,
       flight_modes: newFilters.flightModes.length > 0 ? newFilters.flightModes.join(',') : undefined,
+      tow_min: newFilters.towMin || undefined,
+      tow_max: newFilters.towMax || undefined,
     }, true)
   }
 
@@ -163,6 +169,14 @@ export default function LogListPage() {
           newFilters.flightModes = filters.flightModes.filter((m) => m !== value)
         }
         break
+      case 'towMin':
+        // Remove both TOW fields when removing TOW range chip
+        newFilters.towMin = ''
+        newFilters.towMax = ''
+        break
+      case 'towMax':
+        newFilters.towMax = ''
+        break
     }
 
     // Update URL params based on modified filters
@@ -173,6 +187,8 @@ export default function LogListPage() {
       pilot: newFilters.pilot || undefined,
       tags: newFilters.tags.length > 0 ? newFilters.tags.join(',') : undefined,
       flight_modes: newFilters.flightModes.length > 0 ? newFilters.flightModes.join(',') : undefined,
+      tow_min: newFilters.towMin || undefined,
+      tow_max: newFilters.towMax || undefined,
     }, true)
   }
 

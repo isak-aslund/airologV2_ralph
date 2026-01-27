@@ -78,3 +78,7 @@ def _run_migrations() -> None:
                 text("UPDATE flight_logs SET log_identifier = title WHERE log_identifier IS NULL")
             )
             conn.commit()
+
+        if "tow" not in columns:
+            conn.execute(text("ALTER TABLE flight_logs ADD COLUMN tow REAL"))
+            conn.commit()

@@ -61,6 +61,24 @@ export default function ActiveFilterChips({ filters, onRemoveFilter }: ActiveFil
     })
   }
 
+  // TOW range as single chip
+  if (filters.towMin && filters.towMax) {
+    chips.push({
+      label: `TOW: ${filters.towMin} - ${filters.towMax} kg`,
+      type: 'towMin', // Will handle both towMin and towMax removal
+    })
+  } else if (filters.towMin) {
+    chips.push({
+      label: `TOW: >= ${filters.towMin} kg`,
+      type: 'towMin',
+    })
+  } else if (filters.towMax) {
+    chips.push({
+      label: `TOW: <= ${filters.towMax} kg`,
+      type: 'towMax',
+    })
+  }
+
   // Don't render anything if no active filters
   if (chips.length === 0) {
     return null

@@ -54,6 +54,12 @@ async def list_logs(
     date_to: Optional[datetime] = Query(
         default=None, description="Filter logs up to this date (ISO format)"
     ),
+    tow_min: Optional[float] = Query(
+        default=None, description="Minimum takeoff weight in kg"
+    ),
+    tow_max: Optional[float] = Query(
+        default=None, description="Maximum takeoff weight in kg"
+    ),
     db: Session = Depends(get_db),
 ) -> dict:
     """
@@ -67,6 +73,8 @@ async def list_logs(
     - tags: Comma-separated tag names to filter by
     - date_from: ISO date to filter logs from
     - date_to: ISO date to filter logs up to
+    - tow_min: Minimum takeoff weight in kg
+    - tow_max: Maximum takeoff weight in kg
     """
     # Validate per_page
     if per_page not in (25, 50, 100):
@@ -125,6 +133,12 @@ async def list_logs(
         query = query.filter(FlightLog.flight_date >= date_from)
     if date_to:
         query = query.filter(FlightLog.flight_date <= date_to)
+
+    # Apply TOW range filters
+    if tow_min is not None:
+        query = query.filter(FlightLog.tow >= tow_min)
+    if tow_max is not None:
+        query = query.filter(FlightLog.tow <= tow_max)
 
     # Order by flight_date descending
     query = query.order_by(FlightLog.flight_date.desc())
@@ -270,6 +284,7 @@ async def create_log(
     serial_number: str | None = Form(None),
     comment: str | None = Form(None),
     tags: str | None = Form(None),
+    tow: float | None = Form(None),
     db: Session = Depends(get_db),
 ) -> FlightLog:
     """
@@ -382,6 +397,7 @@ async def create_log(
         takeoff_lat=metadata.get("takeoff_lat"),
         takeoff_lon=metadata.get("takeoff_lon"),
         flight_modes=metadata.get("flight_modes", []),
+        tow=tow,
         tags=tag_objects,
     )
 

@@ -10,6 +10,51 @@ import type { DroneModel, ExtractedMetadata, DuplicateCheckResult } from '../typ
 // Known drone models for dropdowns
 const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
 
+// Drone base weights in kg
+const DRONE_WEIGHTS: Record<string, number> = {
+  'S1': 1.65,
+  'XLT': 6.9,
+  'CX10': 6.58,
+}
+
+// Power options per drone type
+const POWER_OPTIONS: Record<string, Array<{ id: string; label: string; weight: number }>> = {
+  'S1': [
+    { id: 's1-small', label: '[S1] Small battery (6S 16Ah)', weight: 1.56 },
+    { id: 's1-big', label: '[S1] Big battery (6S 30Ah)', weight: 2.68 },
+    { id: 's1-tether', label: '[S1] Tether box', weight: 1.5 },
+  ],
+  'XLT': [
+    { id: 'xlt-default', label: '[XLT] Default battery (12S 22Ah)', weight: 5.7 },
+    { id: 'xlt-tether', label: '[XLT] Tether box', weight: 2.1 },
+  ],
+  'CX10': [
+    { id: 'cx10-small', label: '[CX10] Small battery (12S 25Ah)', weight: 4.2 },
+    { id: 'cx10-big', label: '[CX10] Big battery (12S 50Ah)', weight: 8.0 },
+    { id: 'cx10-tether', label: '[CX10] Tether box', weight: 3.15 },
+  ],
+}
+
+// Payload options (common for all drones)
+const PAYLOAD_OPTIONS = [
+  { id: 'hadron', label: 'Hadron', weight: 0.54 },
+  { id: 'nextvision', label: 'Nextvision', weight: 0.3 },
+  { id: 'workswell', label: 'Workswell', weight: 1.2 },
+  { id: 'speaker', label: 'Speaker', weight: 0.3 },
+  { id: 'sirius-compact', label: 'Sirius Compact', weight: 4.2 },
+]
+
+// Get all power options (for non-standard drones)
+const getAllPowerOptions = () => {
+  const allOptions: Array<{ id: string; label: string; weight: number }> = []
+  Object.entries(POWER_OPTIONS).forEach(([, options]) => {
+    options.forEach(opt => {
+      allOptions.push(opt)
+    })
+  })
+  return allOptions
+}
+
 interface FormData {
   title: string
   pilot: string
@@ -73,6 +118,15 @@ interface FormErrors {
   serial_number?: string
 }
 
+// Setup data for TOW calculation
+interface SetupData {
+  droneWeight: number
+  power: string | null           // Selected option ID or 'custom'
+  customPower: { weight: number; config: string }
+  payloads: string[]             // Selected payload IDs
+  custom: { name: string; comment: string; weight: number } | null
+}
+
 // Per-file override data
 interface FileOverride {
   title: string  // Pre-populated from filename (without .ulg)
@@ -131,6 +185,16 @@ export default function UploadPage() {
   const [batchUploadIndex, setBatchUploadIndex] = useState(0)
   const [fileUploadStatuses, setFileUploadStatuses] = useState<Map<string, FileUploadStatus>>(new Map())
   const [batchUploadComplete, setBatchUploadComplete] = useState(false)
+
+  // Setup state for TOW calculation
+  const [setupData, setSetupData] = useState<SetupData>({
+    droneWeight: 0,
+    power: null,
+    customPower: { weight: 0, config: '' },
+    payloads: [],
+    custom: null,
+  })
+  const [showCustomItem, setShowCustomItem] = useState(false)
 
   // Form state
   const [formData, setFormData] = useState<FormData>({
@@ -401,6 +465,54 @@ export default function UploadPage() {
     }
   }, [metadata, fileMetadataStates, selectedFiles, formData.drone_model])
 
+  // Update drone weight and reset power when drone model changes
+  useEffect(() => {
+    const model = formData.drone_model
+    const knownWeight = DRONE_WEIGHTS[model]
+    setSetupData(prev => ({
+      ...prev,
+      droneWeight: knownWeight ?? 0,
+      power: null,  // Reset power selection when model changes
+      customPower: { weight: 0, config: '' },
+    }))
+  }, [formData.drone_model])
+
+  // Calculate TOW
+  const tow = useMemo(() => {
+    let total = setupData.droneWeight
+
+    // Add power weight
+    if (setupData.power === 'custom') {
+      total += setupData.customPower.weight
+    } else if (setupData.power) {
+      // Find the selected power option
+      const model = formData.drone_model
+      const options = DRONE_WEIGHTS[model] ? POWER_OPTIONS[model] : getAllPowerOptions()
+      const selectedOption = options?.find(opt => opt.id === setupData.power)
+      if (selectedOption) {
+        total += selectedOption.weight
+      }
+    }
+
+    // Add payload weights
+    for (const payloadId of setupData.payloads) {
+      const payload = PAYLOAD_OPTIONS.find(p => p.id === payloadId)
+      if (payload) {
+        total += payload.weight
+      }
+    }
+
+    // Add custom item weight
+    if (setupData.custom) {
+      total += setupData.custom.weight
+    }
+
+    return total
+  }, [setupData, formData.drone_model])
+
+  // Check if setup is valid (drone weight > 0 and power selected)
+  const isSetupValid = setupData.droneWeight > 0 && setupData.power !== null
+
   // Get effective serial number for a file (considering override, metadata, and default)
   const getEffectiveSerialNumber = (filename: string): string => {
     const override = getFileOverride(filename)
@@ -497,7 +609,7 @@ export default function UploadPage() {
   const uploadableFiles = selectedFiles.filter(file => hasValidSerialNumber(file.name) && !isFileDuplicate(file.name))
 
   // Check if upload is valid (defaults set + files selected + all have valid serial numbers + no duplicates)
-  const isBatchUploadValid = formData.pilot.trim() && formData.drone_model && uploadableFiles.length > 0 && allFilesHaveValidSerialNumbers && duplicateFileCount === 0
+  const isBatchUploadValid = formData.pilot.trim() && formData.drone_model && uploadableFiles.length > 0 && allFilesHaveValidSerialNumbers && duplicateFileCount === 0 && isSetupValid
 
   // Handle batch upload submission (for multiple files)
   const handleBatchUpload = async () => {
@@ -556,6 +668,11 @@ export default function UploadPage() {
         const tags = override.tags.length > 0 ? override.tags : formData.tags
         if (tags.length > 0) {
           uploadData.append('tags', tags.join(','))
+        }
+
+        // TOW
+        if (tow > 0) {
+          uploadData.append('tow', tow.toString())
         }
 
         await createLog(uploadData)
@@ -640,6 +757,11 @@ export default function UploadPage() {
       const tags = override.tags.length > 0 ? override.tags : formData.tags
       if (tags.length > 0) {
         uploadData.append('tags', tags.join(','))
+      }
+
+      // TOW
+      if (tow > 0) {
+        uploadData.append('tow', tow.toString())
       }
 
       await createLog(uploadData)
@@ -860,6 +982,14 @@ export default function UploadPage() {
       comment: '',
       tags: [],
     })
+    setSetupData({
+      droneWeight: 0,
+      power: null,
+      customPower: { weight: 0, config: '' },
+      payloads: [],
+      custom: null,
+    })
+    setShowCustomItem(false)
     setFormErrors({})
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
@@ -1040,6 +1170,224 @@ export default function UploadPage() {
               onTagsChange={(tags) => handleFormChange('tags', tags)}
               placeholder="Search or create tags..."
             />
+          </div>
+        </div>
+      )}
+
+      {/* Setup Section - shown when files are selected */}
+      {selectedFiles.length > 0 && (
+        <div className="mb-6 p-6 bg-white rounded-lg border border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Setup</h2>
+
+          {/* Drone Weight */}
+          <div className="mb-4">
+            <label htmlFor="drone-weight" className="block text-sm font-medium text-gray-700 mb-1">
+              Drone Weight <span className="text-red-500">*</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                id="drone-weight"
+                value={setupData.droneWeight || ''}
+                onChange={(e) => setSetupData(prev => ({ ...prev, droneWeight: parseFloat(e.target.value) || 0 }))}
+                step="0.01"
+                min="0"
+                className={`w-32 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  setupData.droneWeight <= 0 ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                }`}
+                placeholder="0.00"
+              />
+              <span className="text-sm text-gray-500">kg</span>
+              {DRONE_WEIGHTS[formData.drone_model] && (
+                <span className="text-xs text-gray-400">(prefilled for {formData.drone_model})</span>
+              )}
+            </div>
+            {setupData.droneWeight <= 0 && (
+              <p className="mt-1 text-sm text-red-600">Drone weight must be greater than 0</p>
+            )}
+          </div>
+
+          {/* Power */}
+          <div className="mb-4">
+            <label htmlFor="power-select" className="block text-sm font-medium text-gray-700 mb-1">
+              Power <span className="text-red-500">*</span>
+            </label>
+            <select
+              id="power-select"
+              value={setupData.power || ''}
+              onChange={(e) => {
+                const value = e.target.value || null
+                setSetupData(prev => ({
+                  ...prev,
+                  power: value,
+                  customPower: value === 'custom' ? prev.customPower : { weight: 0, config: '' },
+                }))
+              }}
+              className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                !setupData.power ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
+            >
+              <option value="">Select power source</option>
+              {(DRONE_WEIGHTS[formData.drone_model] ? POWER_OPTIONS[formData.drone_model] : getAllPowerOptions())?.map(opt => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label} ({opt.weight} kg)
+                </option>
+              ))}
+              <option value="custom">Custom...</option>
+            </select>
+            {!setupData.power && (
+              <p className="mt-1 text-sm text-red-600">Power source is required</p>
+            )}
+
+            {/* Custom power fields */}
+            {setupData.power === 'custom' && (
+              <div className="mt-3 p-3 bg-gray-50 rounded-md border border-gray-200">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Weight (kg)</label>
+                    <input
+                      type="number"
+                      value={setupData.customPower.weight || ''}
+                      onChange={(e) => setSetupData(prev => ({
+                        ...prev,
+                        customPower: { ...prev.customPower, weight: parseFloat(e.target.value) || 0 },
+                      }))}
+                      step="0.01"
+                      min="0"
+                      className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Config/Description</label>
+                    <input
+                      type="text"
+                      value={setupData.customPower.config}
+                      onChange={(e) => setSetupData(prev => ({
+                        ...prev,
+                        customPower: { ...prev.customPower, config: e.target.value },
+                      }))}
+                      className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., Custom 10S 20Ah"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Payloads */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Payload <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <div className="space-y-2">
+              {PAYLOAD_OPTIONS.map(payload => (
+                <label key={payload.id} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={setupData.payloads.includes(payload.id)}
+                    onChange={(e) => {
+                      setSetupData(prev => ({
+                        ...prev,
+                        payloads: e.target.checked
+                          ? [...prev.payloads, payload.id]
+                          : prev.payloads.filter(id => id !== payload.id),
+                      }))
+                    }}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700">{payload.label}</span>
+                  <span className="text-xs text-gray-500">({payload.weight} kg)</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Custom Item */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Custom <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            {!showCustomItem && !setupData.custom ? (
+              <button
+                type="button"
+                onClick={() => setShowCustomItem(true)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Add custom item
+              </button>
+            ) : (
+              <div className="p-3 bg-gray-50 rounded-md border border-gray-200">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
+                    <input
+                      type="text"
+                      value={setupData.custom?.name || ''}
+                      onChange={(e) => setSetupData(prev => ({
+                        ...prev,
+                        custom: { name: e.target.value, comment: prev.custom?.comment || '', weight: prev.custom?.weight || 0 },
+                      }))}
+                      className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Item name"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Comment</label>
+                    <input
+                      type="text"
+                      value={setupData.custom?.comment || ''}
+                      onChange={(e) => setSetupData(prev => ({
+                        ...prev,
+                        custom: { name: prev.custom?.name || '', comment: e.target.value, weight: prev.custom?.weight || 0 },
+                      }))}
+                      className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Optional"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Weight (kg)</label>
+                    <input
+                      type="number"
+                      value={setupData.custom?.weight || ''}
+                      onChange={(e) => setSetupData(prev => ({
+                        ...prev,
+                        custom: { name: prev.custom?.name || '', comment: prev.custom?.comment || '', weight: parseFloat(e.target.value) || 0 },
+                      }))}
+                      step="0.01"
+                      min="0"
+                      className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSetupData(prev => ({ ...prev, custom: null }))
+                    setShowCustomItem(false)
+                  }}
+                  className="mt-2 text-xs text-red-600 hover:text-red-700"
+                >
+                  Remove custom item
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* TOW Display */}
+          <div className="pt-4 border-t border-gray-200">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-700">TOW (Takeoff Weight)</span>
+              <span className="text-lg font-semibold text-gray-900">{tow.toFixed(2)} kg</span>
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              Calculated from drone weight + power + payloads + custom items
+            </p>
           </div>
         </div>
       )}
@@ -1647,6 +1995,34 @@ export default function UploadPage() {
                   </p>
                   <p className="text-sm text-amber-700 mt-1">
                     Expand the file(s) to enter a serial number, or set a default serial number above.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Setup validation warning */}
+          {!isSetupValid && (
+            <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-md">
+              <div className="flex items-start gap-3">
+                <svg
+                  className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-amber-800">Setup incomplete</p>
+                  <p className="text-sm text-amber-700 mt-1">
+                    {setupData.droneWeight <= 0 && 'Drone weight must be greater than 0. '}
+                    {!setupData.power && 'Power source is required.'}
                   </p>
                 </div>
               </div>

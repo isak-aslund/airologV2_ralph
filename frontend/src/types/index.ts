@@ -27,6 +27,7 @@ export interface FlightLog {
   flight_date: string | null; // ISO date string
   flight_review_id: string | null; // ID on Flight Review server (null if not uploaded)
   flight_modes: string[]; // Auto-extracted flight modes from ULog
+  tow: number | null; // Takeoff weight in kg
   created_at: string; // ISO datetime string
   updated_at: string; // ISO datetime string
   tags: Tag[];
@@ -60,6 +61,7 @@ export interface FlightLogCreate {
   takeoff_lon?: number | null;
   flight_date?: string | null;
   tags?: string[];
+  tow?: number | null;
 }
 
 export interface FlightLogUpdate {
@@ -86,6 +88,8 @@ export interface LogListParams {
   flight_modes?: string; // Comma-separated flight mode names
   date_from?: string; // ISO date
   date_to?: string; // ISO date
+  tow_min?: number; // Minimum takeoff weight in kg
+  tow_max?: number; // Maximum takeoff weight in kg
 }
 
 // Extracted metadata from a .ulg file
