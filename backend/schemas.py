@@ -61,6 +61,7 @@ class FlightLogResponse(BaseModel):
     title: str
     pilot: str
     serial_number: Optional[str]
+    log_identifier: Optional[str]
     drone_model: str
     duration_seconds: Optional[float]
     file_path: str
@@ -106,3 +107,33 @@ class ExtractedMetadataResponse(BaseModel):
     takeoff_lat: Optional[float]
     takeoff_lon: Optional[float]
     flight_modes: list[str]
+    log_identifier: Optional[str]  # Derived from filename for duplicate checking
+
+
+# Duplicate Check Schemas
+class DuplicateCheckItem(BaseModel):
+    """Single item to check for duplicates."""
+
+    serial_number: str
+    log_identifier: str
+
+
+class DuplicateCheckRequest(BaseModel):
+    """Request to check multiple logs for duplicates."""
+
+    items: list[DuplicateCheckItem]
+
+
+class DuplicateCheckResult(BaseModel):
+    """Result for a single duplicate check."""
+
+    serial_number: str
+    log_identifier: str
+    exists: bool
+    existing_log_id: Optional[str] = None
+
+
+class DuplicateCheckResponse(BaseModel):
+    """Response for duplicate check."""
+
+    results: list[DuplicateCheckResult]

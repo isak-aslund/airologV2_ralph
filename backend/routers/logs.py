@@ -16,7 +16,16 @@ from sqlalchemy.orm import Session
 from backend.config import settings
 from backend.database import get_db
 from backend.models import FlightLog, Tag
-from backend.schemas import ExtractedMetadataResponse, FlightLogResponse, FlightLogUpdate, PaginatedResponse, StatsResponse
+from backend.schemas import (
+    DuplicateCheckRequest,
+    DuplicateCheckResponse,
+    DuplicateCheckResult,
+    ExtractedMetadataResponse,
+    FlightLogResponse,
+    FlightLogUpdate,
+    PaginatedResponse,
+    StatsResponse,
+)
 from backend.services.ulog_parser import extract_metadata, get_parameters
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
@@ -194,6 +203,38 @@ def validate_serial_number(serial: str | None) -> str | None:
     return None
 
 
+@router.post("/check-duplicates", response_model=DuplicateCheckResponse)
+async def check_duplicates(
+    request: DuplicateCheckRequest,
+    db: Session = Depends(get_db),
+) -> DuplicateCheckResponse:
+    """
+    Check if logs already exist in the database.
+
+    Each log is uniquely identified by the combination of serial_number and log_identifier.
+    This endpoint allows batch checking before upload to prevent duplicate uploads.
+    """
+    results: list[DuplicateCheckResult] = []
+
+    for item in request.items:
+        # Look for existing log with same serial_number and log_identifier
+        existing = db.query(FlightLog).filter(
+            FlightLog.serial_number == item.serial_number,
+            FlightLog.log_identifier == item.log_identifier,
+        ).first()
+
+        results.append(
+            DuplicateCheckResult(
+                serial_number=item.serial_number,
+                log_identifier=item.log_identifier,
+                exists=existing is not None,
+                existing_log_id=existing.id if existing else None,
+            )
+        )
+
+    return DuplicateCheckResponse(results=results)
+
+
 @router.post("", response_model=FlightLogResponse, status_code=status.HTTP_201_CREATED)
 async def create_log(
     file: UploadFile = File(...),
@@ -217,6 +258,18 @@ async def create_log(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="File must be a .ulg file",
         )
+
+    # Extract log_identifier from filename (filename without .ulg extension)
+    log_identifier = file.filename[:-4] if file.filename.lower().endswith(".ulg") else file.filename
+
+    # Validate serial number early (before file operations) if provided
+    if serial_number:
+        serial_error = validate_serial_number(serial_number)
+        if serial_error:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid serial number: {serial_error}. Serial numbers must be exactly 10 digits.",
+            )
 
     # Generate unique ID for the log
     log_id = str(uuid.uuid4())
@@ -255,6 +308,23 @@ async def create_log(
             detail=f"Invalid serial number: {serial_error}. Serial numbers must be exactly 10 digits.",
         )
 
+    # Check for duplicate: same serial_number + log_identifier
+    existing_log = db.query(FlightLog).filter(
+        FlightLog.serial_number == final_serial_number,
+        FlightLog.log_identifier == log_identifier,
+    ).first()
+
+    if existing_log:
+        # Clean up the file we just saved
+        try:
+            file_path.unlink()
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Log already exists in database. A log with serial number '{final_serial_number}' and identifier '{log_identifier}' is already uploaded.",
+        )
+
     # Parse tags from comma-separated string
     tag_names: list[str] = []
     if tags:
@@ -270,6 +340,7 @@ async def create_log(
         pilot=pilot,
         drone_model=drone_model,
         serial_number=final_serial_number,
+        log_identifier=log_identifier,
         file_path=str(file_path),
         comment=comment,
         duration_seconds=metadata.get("duration_seconds"),

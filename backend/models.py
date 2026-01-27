@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, JSON, String, Table, Text
+from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.database import Base
@@ -46,6 +46,10 @@ class FlightLog(Base):
     """Flight log model for storing ULog file metadata."""
 
     __tablename__ = "flight_logs"
+    __table_args__ = (
+        # Unique constraint: same drone (serial_number) cannot have duplicate logs (log_identifier)
+        UniqueConstraint("serial_number", "log_identifier", name="uq_serial_log_identifier"),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36),
@@ -54,7 +58,9 @@ class FlightLog(Base):
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     pilot: Mapped[str] = mapped_column(String(100), nullable=False)
-    serial_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    serial_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    # Log identifier - unique per drone, derived from original filename
+    log_identifier: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     drone_model: Mapped[str] = mapped_column(String(50), nullable=False)
     duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)

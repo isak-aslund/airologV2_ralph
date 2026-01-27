@@ -17,6 +17,7 @@ export interface FlightLog {
   title: string;
   pilot: string;
   serial_number: string | null;
+  log_identifier: string | null; // Unique identifier within a drone (from filename)
   drone_model: string;
   duration_seconds: number | null;
   file_path: string;
@@ -93,7 +94,29 @@ export interface ExtractedMetadata {
   flight_date: string | null; // ISO datetime string
   serial_number: string | null;
   drone_model: string | null; // S1, CX10, XLT, or "unknown"
+  log_identifier: string | null; // Unique identifier derived from filename
   takeoff_lat: number | null;
   takeoff_lon: number | null;
   flight_modes: string[]; // Auto-extracted flight modes from ULog
+}
+
+// Duplicate check types
+export interface DuplicateCheckItem {
+  serial_number: string;
+  log_identifier: string;
+}
+
+export interface DuplicateCheckRequest {
+  items: DuplicateCheckItem[];
+}
+
+export interface DuplicateCheckResult {
+  serial_number: string;
+  log_identifier: string;
+  exists: boolean;
+  existing_log_id: string | null;
+}
+
+export interface DuplicateCheckResponse {
+  results: DuplicateCheckResult[];
 }

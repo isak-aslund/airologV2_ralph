@@ -1,11 +1,11 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { createLog, extractMetadata } from '../api/logs'
+import { createLog, extractMetadata, checkDuplicates } from '../api/logs'
 import { getPilots } from '../api/pilots'
 import TagInput from '../components/TagInput'
 import DroneLogsPanel from '../components/DroneLogsPanel'
 import type { DownloadedLog } from '../lib/droneConnection'
-import type { DroneModel, ExtractedMetadata } from '../types'
+import type { DroneModel, ExtractedMetadata, DuplicateCheckResult } from '../types'
 
 // Known drone models for dropdowns
 const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
@@ -123,6 +123,9 @@ export default function UploadPage() {
   // Per-file metadata state (for batch metadata preview)
   const [fileMetadataStates, setFileMetadataStates] = useState<Map<string, FileMetadataState>>(new Map())
 
+  // Per-file duplicate check state
+  const [fileDuplicateStates, setFileDuplicateStates] = useState<Map<string, DuplicateCheckResult>>(new Map())
+
   // Batch upload state
   const [isBatchUploading, setIsBatchUploading] = useState(false)
   const [batchUploadIndex, setBatchUploadIndex] = useState(0)
@@ -176,6 +179,12 @@ export default function UploadPage() {
 
   // Helper to get title from filename (without .ulg extension)
   const getTitleFromFilename = (filename: string): string => {
+    return filename.replace(/\.ulg$/i, '')
+  }
+
+  // Get log identifier from filename (filename without .ulg extension)
+  // This is used to uniquely identify a log within a drone's serial number
+  const getLogIdentifier = (filename: string): string => {
     return filename.replace(/\.ulg$/i, '')
   }
 
@@ -422,8 +431,73 @@ export default function UploadPage() {
   // Check if all files have valid serial numbers
   const allFilesHaveValidSerialNumbers = selectedFiles.every(file => hasValidSerialNumber(file.name))
 
-  // Check if upload is valid (defaults set + files selected + all have valid serial numbers)
-  const isBatchUploadValid = formData.pilot.trim() && formData.drone_model && selectedFiles.length > 0 && allFilesHaveValidSerialNumbers
+  // Check if a file is a duplicate (already in database)
+  const isFileDuplicate = (filename: string): boolean => {
+    const dupState = fileDuplicateStates.get(filename)
+    return dupState?.exists ?? false
+  }
+
+  
+  // Check for duplicates when files have valid serial numbers
+  useEffect(() => {
+    const checkFileDuplicates = async () => {
+      // Build list of files to check (those with valid serial numbers)
+      const itemsToCheck: { filename: string; serial_number: string; log_identifier: string }[] = []
+
+      for (const file of selectedFiles) {
+        const serial = getEffectiveSerialNumber(file.name)
+        if (isValidSerialFormat(serial) && !isDefaultSerialNumber(serial)) {
+          const logId = getLogIdentifier(file.name)
+          // Only check if we haven't already checked this combo
+          const existing = fileDuplicateStates.get(file.name)
+          if (!existing || existing.serial_number !== serial || existing.log_identifier !== logId) {
+            itemsToCheck.push({
+              filename: file.name,
+              serial_number: serial,
+              log_identifier: logId,
+            })
+          }
+        }
+      }
+
+      if (itemsToCheck.length === 0) return
+
+      try {
+        const response = await checkDuplicates({
+          items: itemsToCheck.map(item => ({
+            serial_number: item.serial_number,
+            log_identifier: item.log_identifier,
+          })),
+        })
+
+        // Update duplicate states
+        setFileDuplicateStates(prev => {
+          const newMap = new Map(prev)
+          for (let i = 0; i < itemsToCheck.length; i++) {
+            const item = itemsToCheck[i]
+            const result = response.results[i]
+            if (result) {
+              newMap.set(item.filename, result)
+            }
+          }
+          return newMap
+        })
+      } catch (error) {
+        console.error('Failed to check duplicates:', error)
+      }
+    }
+
+    checkFileDuplicates()
+  }, [selectedFiles, fileMetadataStates, fileOverrides, formData.serial_number])
+
+  // Count files that are duplicates
+  const duplicateFileCount = selectedFiles.filter(file => isFileDuplicate(file.name)).length
+
+  // Files that can be uploaded (not duplicates and have valid serial)
+  const uploadableFiles = selectedFiles.filter(file => hasValidSerialNumber(file.name) && !isFileDuplicate(file.name))
+
+  // Check if upload is valid (defaults set + files selected + all have valid serial numbers + no duplicates)
+  const isBatchUploadValid = formData.pilot.trim() && formData.drone_model && uploadableFiles.length > 0 && allFilesHaveValidSerialNumbers && duplicateFileCount === 0
 
   // Handle batch upload submission (for multiple files)
   const handleBatchUpload = async () => {
@@ -744,6 +818,11 @@ export default function UploadPage() {
         newMap.delete(removedFile.name)
         return newMap
       })
+      setFileDuplicateStates(prev => {
+        const newMap = new Map(prev)
+        newMap.delete(removedFile.name)
+        return newMap
+      })
     }
     // Reset form state if all files removed
     if (selectedFiles.length === 1) {
@@ -767,6 +846,7 @@ export default function UploadPage() {
     setExpandedFiles(new Set())
     setFileMetadataStates(new Map())
     setFileUploadStatuses(new Map())
+    setFileDuplicateStates(new Map())
     setMetadata(null)
     setFromDrone(false)
     setIsBatchUploading(false)
@@ -1109,6 +1189,23 @@ export default function UploadPage() {
                               d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
                             />
                           </svg>
+                        ) : isFileDuplicate(file.name) ? (
+                          // Red cloud icon for duplicates
+                          <span title="Already in database">
+                            <svg
+                              className="w-5 h-5 text-red-500 flex-shrink-0"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"
+                              />
+                            </svg>
+                          </span>
                         ) : (
                           <svg
                             className="w-5 h-5 text-gray-400 flex-shrink-0"
@@ -1136,7 +1233,12 @@ export default function UploadPage() {
                             {uploadStatus?.status === 'error' && (
                               <span className="text-xs text-red-600 font-medium" title={uploadStatus.error}>Failed</span>
                             )}
-                            {!uploadStatus && !hasValidSerialNumber(file.name) && (
+                            {!uploadStatus && isFileDuplicate(file.name) && (
+                              <span className="inline-flex items-center gap-0.5 text-xs text-red-600 font-medium" title="This log already exists in the database">
+                                Already in database
+                              </span>
+                            )}
+                            {!uploadStatus && !isFileDuplicate(file.name) && !hasValidSerialNumber(file.name) && (
                               <span className="inline-flex items-center gap-0.5 text-xs text-amber-600 font-medium" title="Serial number required">
                                 <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -1545,6 +1647,34 @@ export default function UploadPage() {
                   </p>
                   <p className="text-sm text-amber-700 mt-1">
                     Expand the file(s) to enter a serial number, or set a default serial number above.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Duplicate warning */}
+          {duplicateFileCount > 0 && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+              <div className="flex items-start gap-3">
+                <svg
+                  className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"
+                  />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-red-800">Duplicate logs detected</p>
+                  <p className="text-sm text-red-700 mt-1">
+                    {duplicateFileCount} file(s) already exist in the database and cannot be uploaded again.
+                    Remove these files to continue.
                   </p>
                 </div>
               </div>

@@ -67,3 +67,14 @@ def _run_migrations() -> None:
                 text("ALTER TABLE flight_logs ADD COLUMN flight_modes TEXT DEFAULT '[]'")
             )
             conn.commit()
+
+        if "log_identifier" not in columns:
+            # Add log_identifier column - for existing records, we'll populate from title
+            conn.execute(
+                text("ALTER TABLE flight_logs ADD COLUMN log_identifier VARCHAR(255)")
+            )
+            # Populate log_identifier from title for existing records
+            conn.execute(
+                text("UPDATE flight_logs SET log_identifier = title WHERE log_identifier IS NULL")
+            )
+            conn.commit()

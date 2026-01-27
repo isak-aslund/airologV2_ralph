@@ -1,5 +1,13 @@
 import client from './client'
-import type { ExtractedMetadata, FlightLog, FlightLogUpdate, LogListParams, PaginatedResponse } from '../types'
+import type {
+  DuplicateCheckRequest,
+  DuplicateCheckResponse,
+  ExtractedMetadata,
+  FlightLog,
+  FlightLogUpdate,
+  LogListParams,
+  PaginatedResponse,
+} from '../types'
 
 /**
  * Get paginated list of flight logs with optional filters.
@@ -86,5 +94,14 @@ export async function extractMetadata(file: File): Promise<ExtractedMetadata> {
  */
 export async function uploadToFlightReview(id: string): Promise<{ flight_review_id: string; url: string }> {
   const response = await client.post<{ flight_review_id: string; url: string }>(`/logs/${id}/upload-to-flight-review`)
+  return response.data
+}
+
+/**
+ * Check if logs already exist in the database.
+ * Used to prevent duplicate uploads.
+ */
+export async function checkDuplicates(request: DuplicateCheckRequest): Promise<DuplicateCheckResponse> {
+  const response = await client.post<DuplicateCheckResponse>('/logs/check-duplicates', request)
   return response.data
 }

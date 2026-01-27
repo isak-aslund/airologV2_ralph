@@ -113,6 +113,28 @@ def _parse_date_from_filename(filename: str) -> datetime | None:
     return None
 
 
+def _get_log_identifier(filename: str | None) -> str | None:
+    """
+    Extract log identifier from filename.
+
+    The log identifier is the filename without the .ulg extension.
+    This provides a unique identifier per drone since filenames
+    typically contain the log ID and timestamp from the drone.
+
+    Args:
+        filename: Original filename (e.g., "log_123_2024-01-15-10-30-00.ulg")
+
+    Returns:
+        Log identifier (e.g., "log_123_2024-01-15-10-30-00") or None
+    """
+    if not filename:
+        return None
+    # Remove .ulg extension (case-insensitive)
+    if filename.lower().endswith(".ulg"):
+        return filename[:-4]
+    return filename
+
+
 def extract_metadata(
     file_path: str | Path, original_filename: str | None = None
 ) -> dict[str, Any]:
@@ -121,16 +143,19 @@ def extract_metadata(
 
     Args:
         file_path: Path to the .ulg file
-        original_filename: Original filename (used for date extraction fallback)
+        original_filename: Original filename (used for date extraction fallback and log_identifier)
 
     Returns:
         Dictionary with:
         - duration_seconds: float or None
         - flight_date: datetime or None
         - serial_number: str or None (from AIROLIT_SERIAL param)
+        - log_identifier: str or None (derived from original filename)
         - takeoff_lat: float or None
         - takeoff_lon: float or None
     """
+    log_identifier = _get_log_identifier(original_filename)
+
     try:
         ulog = ULog(str(file_path))
     except Exception:
@@ -139,6 +164,7 @@ def extract_metadata(
             "flight_date": None,
             "serial_number": None,
             "drone_model": None,
+            "log_identifier": log_identifier,
             "takeoff_lat": None,
             "takeoff_lon": None,
             "flight_modes": [],
@@ -289,6 +315,7 @@ def extract_metadata(
         "flight_date": flight_date,
         "serial_number": serial_number,
         "drone_model": drone_model,
+        "log_identifier": log_identifier,
         "takeoff_lat": takeoff_lat,
         "takeoff_lon": takeoff_lon,
         "flight_modes": flight_modes,
