@@ -1,5 +1,21 @@
 import type { FilterState } from './FilterPanel'
 
+// Map SYS_AUTOSTART values to model names (for display hints)
+const AUTOSTART_TO_MODEL: Record<string, string> = {
+  '4006': 'XLT',
+  '4010': 'S1',
+  '4030': 'CX10',
+}
+
+// Format drone model for display: "4030 [CX10]" or just the number for unknown
+const formatDroneModel = (autostart: string): string => {
+  const modelName = AUTOSTART_TO_MODEL[autostart]
+  if (modelName) {
+    return `${autostart} [${modelName}]`
+  }
+  return autostart
+}
+
 interface ActiveFilterChipsProps {
   filters: FilterState
   onRemoveFilter: (type: keyof FilterState, value?: string) => void
@@ -29,7 +45,7 @@ export default function ActiveFilterChips({ filters, onRemoveFilter }: ActiveFil
   // Drone model chips (one per selected model)
   for (const model of filters.droneModels) {
     chips.push({
-      label: `Model: ${model}`,
+      label: `Model: ${formatDroneModel(model)}`,
       type: 'droneModels',
       value: model,
     })

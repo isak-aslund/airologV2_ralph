@@ -2,8 +2,15 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { FlightLog, DroneModel } from '../types'
 
-// Known drone models that have thumbnail images
-const KNOWN_DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
+// Known drone models as SYS_AUTOSTART values
+const KNOWN_DRONE_MODELS: DroneModel[] = ['4006', '4010', '4030']  // XLT, S1, CX10
+
+// Map SYS_AUTOSTART values to model names (for images)
+const AUTOSTART_TO_MODEL: Record<string, string> = {
+  '4006': 'XLT',
+  '4010': 'S1',
+  '4030': 'CX10',
+}
 
 // Tooltip component for truncated comments - uses portal to avoid overflow clipping
 interface TooltipProps {
@@ -273,8 +280,8 @@ export default function FlightLogTable({
               <td className="px-3 py-2 whitespace-nowrap">
                 {KNOWN_DRONE_MODELS.includes(log.drone_model as DroneModel) ? (
                   <img
-                    src={`/img/${log.drone_model}.png`}
-                    alt={`${log.drone_model} drone`}
+                    src={`/img/${AUTOSTART_TO_MODEL[log.drone_model]}.png`}
+                    alt={`${AUTOSTART_TO_MODEL[log.drone_model]} drone`}
                     className="w-10 h-10 object-contain"
                   />
                 ) : (

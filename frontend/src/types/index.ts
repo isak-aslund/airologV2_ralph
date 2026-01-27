@@ -2,8 +2,8 @@
  * TypeScript types matching the backend API schemas.
  */
 
-// Known drone models (for UI dropdowns)
-export type DroneModel = 'XLT' | 'S1' | 'CX10';
+// Known drone models as SYS_AUTOSTART values (for UI dropdowns)
+export type DroneModel = '4006' | '4010' | '4030';  // XLT, S1, CX10
 
 // Tag type
 export interface Tag {
@@ -97,7 +97,7 @@ export interface ExtractedMetadata {
   duration_seconds: number | null;
   flight_date: string | null; // ISO datetime string
   serial_number: string | null;
-  drone_model: string | null; // S1, CX10, XLT, or "unknown"
+  drone_model: string | null; // SYS_AUTOSTART value (e.g., "4030", "4010", "4006")
   log_identifier: string | null; // Unique identifier derived from filename
   takeoff_lat: number | null;
   takeoff_lon: number | null;

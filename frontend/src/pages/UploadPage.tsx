@@ -5,30 +5,48 @@ import { getPilots } from '../api/pilots'
 import TagInput from '../components/TagInput'
 import DroneLogsPanel from '../components/DroneLogsPanel'
 import type { DownloadedLog } from '../lib/droneConnection'
-import type { DroneModel, ExtractedMetadata, DuplicateCheckResult } from '../types'
+import type { ExtractedMetadata, DuplicateCheckResult } from '../types'
 
-// Known drone models for dropdowns
-const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
+// Known drone models as SYS_AUTOSTART values
+const DRONE_MODELS: string[] = ['4006', '4010', '4030']  // XLT, S1, CX10
 
-// Drone base weights in kg
-const DRONE_WEIGHTS: Record<string, number> = {
-  'S1': 1.65,
-  'XLT': 6.9,
-  'CX10': 6.58,
+// Map SYS_AUTOSTART values to human-readable model names
+const AUTOSTART_TO_MODEL: Record<string, string> = {
+  '4006': 'XLT',
+  '4010': 'S1',
+  '4030': 'CX10',
 }
 
-// Power options per drone type
+// Format drone model for display: "4030 [CX10]" or just "4001" for unknown models
+const formatDroneModel = (autostart: string | null | undefined): string | null => {
+  if (!autostart) return null
+  const modelName = AUTOSTART_TO_MODEL[autostart]
+  if (modelName) {
+    return `${autostart} [${modelName}]`
+  }
+  // For unknown SYS_AUTOSTART values, just show the number
+  return autostart
+}
+
+// Drone base weights in kg (keyed by SYS_AUTOSTART)
+const DRONE_WEIGHTS: Record<string, number> = {
+  '4010': 1.65,   // S1
+  '4006': 6.9,    // XLT
+  '4030': 6.58,   // CX10
+}
+
+// Power options per drone type (keyed by SYS_AUTOSTART)
 const POWER_OPTIONS: Record<string, Array<{ id: string; label: string; weight: number }>> = {
-  'S1': [
+  '4010': [  // S1
     { id: 's1-small', label: '[S1] Small battery (6S 16Ah)', weight: 1.56 },
     { id: 's1-big', label: '[S1] Big battery (6S 30Ah)', weight: 2.68 },
     { id: 's1-tether', label: '[S1] Tether box', weight: 1.5 },
   ],
-  'XLT': [
+  '4006': [  // XLT
     { id: 'xlt-default', label: '[XLT] Default battery (12S 22Ah)', weight: 5.7 },
     { id: 'xlt-tether', label: '[XLT] Tether box', weight: 2.1 },
   ],
-  'CX10': [
+  '4030': [  // CX10
     { id: 'cx10-small', label: '[CX10] Small battery (12S 25Ah)', weight: 4.2 },
     { id: 'cx10-big', label: '[CX10] Big battery (12S 50Ah)', weight: 8.0 },
     { id: 'cx10-tether', label: '[CX10] Tether box', weight: 3.15 },
@@ -438,44 +456,40 @@ export default function UploadPage() {
     extractAll()
   }, [selectedFiles, fileMetadataStates])
 
-  // Prepopulate drone model from extracted metadata
-  useEffect(() => {
-    // Only prepopulate if drone_model is not already set
-    if (formData.drone_model) return
+  // Get the common detected drone model (if all files have the same model)
+  const commonDetectedModel = useMemo(() => {
+    if (selectedFiles.length === 0) return null
 
-    // For single file, use the metadata state
-    if (selectedFiles.length === 1 && metadata?.drone_model) {
-      const model = metadata.drone_model
-      // Set any valid model (known models or custom values like "4001")
-      if (model && model !== 'unknown') {
-        setFormData(prev => ({ ...prev, drone_model: model }))
-      }
-      return
-    }
-
-    // For multiple files, use the first file's metadata as default
-    if (selectedFiles.length > 1) {
-      const firstFileMetadata = fileMetadataStates.get(selectedFiles[0]?.name)?.metadata
-      if (firstFileMetadata?.drone_model) {
-        const model = firstFileMetadata.drone_model
-        if (model && model !== 'unknown') {
-          setFormData(prev => ({ ...prev, drone_model: model }))
-        }
+    const models = new Set<string>()
+    for (const file of selectedFiles) {
+      const meta = fileMetadataStates.get(file.name)?.metadata
+      if (meta?.drone_model && meta.drone_model !== 'unknown') {
+        models.add(meta.drone_model)
       }
     }
-  }, [metadata, fileMetadataStates, selectedFiles, formData.drone_model])
+    // Return the common model if exactly one unique model, otherwise null
+    if (models.size === 1) {
+      return Array.from(models)[0]
+    }
+    return null
+  }, [selectedFiles, fileMetadataStates])
 
-  // Update drone weight and reset power when drone model changes
+  // Check if all files have the same drone model (for showing/hiding default drone model field)
+  const allFilesSameDroneModel = commonDetectedModel !== null || selectedFiles.length <= 1
+
+  // Effective drone model for Setup section: user selection or common detected model
+  const effectiveDroneModel = formData.drone_model || commonDetectedModel || ''
+
+  // Update drone weight and reset power when effective drone model changes
   useEffect(() => {
-    const model = formData.drone_model
-    const knownWeight = DRONE_WEIGHTS[model]
+    const knownWeight = DRONE_WEIGHTS[effectiveDroneModel]
     setSetupData(prev => ({
       ...prev,
       droneWeight: knownWeight ?? 0,
       power: null,  // Reset power selection when model changes
       customPower: { weight: 0, config: '' },
     }))
-  }, [formData.drone_model])
+  }, [effectiveDroneModel])
 
   // Calculate TOW
   const tow = useMemo(() => {
@@ -486,8 +500,7 @@ export default function UploadPage() {
       total += setupData.customPower.weight
     } else if (setupData.power) {
       // Find the selected power option
-      const model = formData.drone_model
-      const options = DRONE_WEIGHTS[model] ? POWER_OPTIONS[model] : getAllPowerOptions()
+      const options = DRONE_WEIGHTS[effectiveDroneModel] ? POWER_OPTIONS[effectiveDroneModel] : getAllPowerOptions()
       const selectedOption = options?.find(opt => opt.id === setupData.power)
       if (selectedOption) {
         total += selectedOption.weight
@@ -508,7 +521,7 @@ export default function UploadPage() {
     }
 
     return total
-  }, [setupData, formData.drone_model])
+  }, [setupData, effectiveDroneModel])
 
   // Check if setup is valid (drone weight > 0 and power selected)
   const isSetupValid = setupData.droneWeight > 0 && setupData.power !== null
@@ -608,8 +621,20 @@ export default function UploadPage() {
   // Files that can be uploaded (not duplicates and have valid serial)
   const uploadableFiles = selectedFiles.filter(file => hasValidSerialNumber(file.name) && !isFileDuplicate(file.name))
 
+  // Check if all files have a valid drone model (from override, default, or detected metadata)
+  const allFilesHaveDroneModel = useMemo(() => {
+    if (formData.drone_model) return true  // Default is set, all files will use it
+    // Check each file has its own drone model
+    return selectedFiles.every(file => {
+      const override = fileOverrides.get(file.name)
+      if (override?.drone_model) return true
+      const metadata = fileMetadataStates.get(file.name)?.metadata
+      return metadata?.drone_model && metadata.drone_model !== 'unknown'
+    })
+  }, [formData.drone_model, selectedFiles, fileOverrides, fileMetadataStates])
+
   // Check if upload is valid (defaults set + files selected + all have valid serial numbers + no duplicates)
-  const isBatchUploadValid = formData.pilot.trim() && formData.drone_model && uploadableFiles.length > 0 && allFilesHaveValidSerialNumbers && duplicateFileCount === 0 && isSetupValid
+  const isBatchUploadValid = formData.pilot.trim() && allFilesHaveDroneModel && uploadableFiles.length > 0 && allFilesHaveValidSerialNumbers && duplicateFileCount === 0 && isSetupValid
 
   // Handle batch upload submission (for multiple files)
   const handleBatchUpload = async () => {
@@ -651,7 +676,9 @@ export default function UploadPage() {
         const pilot = override.pilot.trim() || formData.pilot.trim()
         uploadData.append('pilot', pilot)
 
-        const droneModel = override.drone_model || formData.drone_model
+        // Drone model: per-file override, or default, or detected from metadata
+        const fileMetadata = fileMetadataStates.get(file.name)?.metadata
+        const droneModel = override.drone_model || formData.drone_model || fileMetadata?.drone_model || ''
         uploadData.append('drone_model', droneModel)
 
         // Comment: per-file override or default (if any)
@@ -740,7 +767,8 @@ export default function UploadPage() {
       const pilot = override.pilot.trim() || formData.pilot.trim()
       uploadData.append('pilot', pilot)
 
-      const droneModel = override.drone_model || formData.drone_model
+      // Drone model: per-file override, or default, or detected from metadata
+      const droneModel = override.drone_model || formData.drone_model || metadata?.drone_model || ''
       uploadData.append('drone_model', droneModel)
 
       // Comment: per-file override or default (if any)
@@ -1302,6 +1330,14 @@ export default function UploadPage() {
                                     {formatDate(fileMetadata.flight_date)}
                                   </span>
                                 )}
+                                {fileMetadata.drone_model && (
+                                  <span className="inline-flex items-center gap-1">
+                                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                                    </svg>
+                                    {formatDroneModel(fileMetadata.drone_model)}
+                                  </span>
+                                )}
                                 {fileMetadata.serial_number !== null && (
                                   isDefaultSerialNumber(fileMetadata.serial_number) ? (
                                     <span className="inline-flex items-center gap-1 text-amber-600" title={`AIROLIT_SERIAL=${fileMetadata.serial_number} is a model default. Each drone must have a unique serial number. Update the PX4 AIROLIT_SERIAL parameter or enter one manually.`}>
@@ -1345,6 +1381,7 @@ export default function UploadPage() {
                                 )}
                                 {fileMetadata.duration_seconds === null &&
                                   fileMetadata.flight_date === null &&
+                                  !fileMetadata.drone_model &&
                                   fileMetadata.serial_number === null &&
                                   fileMetadata.takeoff_lat === null &&
                                   (!fileMetadata.flight_modes || fileMetadata.flight_modes.length === 0) && (
@@ -1405,6 +1442,9 @@ export default function UploadPage() {
                             <div>
                               <label className="block text-xs font-medium text-gray-600 mb-1">
                                 Drone Model <span className="text-gray-400">(override)</span>
+                                {fileMetadata?.drone_model && (
+                                  <span className="text-gray-400 font-normal ml-1">(detected: {formatDroneModel(fileMetadata.drone_model)})</span>
+                                )}
                               </label>
                               <select
                                 value={override.drone_model}
@@ -1414,11 +1454,11 @@ export default function UploadPage() {
                                 <option value="">Use default if empty</option>
                                 {DRONE_MODELS.map((model) => (
                                   <option key={model} value={model}>
-                                    {model}
+                                    {formatDroneModel(model)}
                                   </option>
                                 ))}
                                 {/* Show custom model from default if not in known models */}
-                                {formData.drone_model && !DRONE_MODELS.includes(formData.drone_model as DroneModel) && (
+                                {formData.drone_model && !DRONE_MODELS.includes(formData.drone_model) && (
                                   <option value={formData.drone_model}>
                                     {formData.drone_model}
                                   </option>
@@ -1670,36 +1710,45 @@ export default function UploadPage() {
               )}
             </div>
 
-            {/* Drone Model */}
-            <div>
-              <label htmlFor="default-drone-model" className="block text-sm font-medium text-gray-700 mb-1">
-                Drone Model <span className="text-red-500">*</span>
-              </label>
-              <select
-                id="default-drone-model"
-                value={formData.drone_model}
-                onChange={(e) => handleFormChange('drone_model', e.target.value)}
-                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  formErrors.drone_model ? 'border-red-500' : 'border-gray-300'
-                }`}
-              >
-                <option value="">Select drone model</option>
-                {DRONE_MODELS.map((model) => (
-                  <option key={model} value={model}>
-                    {model}
-                  </option>
-                ))}
-                {/* Show custom model if not in known models list */}
-                {formData.drone_model && !DRONE_MODELS.includes(formData.drone_model as DroneModel) && (
-                  <option value={formData.drone_model}>
-                    {formData.drone_model}
-                  </option>
+            {/* Drone Model - only show if all files have the same model */}
+            {allFilesSameDroneModel ? (
+              <div>
+                <label htmlFor="default-drone-model" className="block text-sm font-medium text-gray-700 mb-1">
+                  Drone Model <span className="text-red-500">*</span>
+                </label>
+                <select
+                  id="default-drone-model"
+                  value={formData.drone_model}
+                  onChange={(e) => handleFormChange('drone_model', e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    formErrors.drone_model ? 'border-red-500' : 'border-gray-300'
+                  }`}
+                >
+                  <option value="">Select drone model</option>
+                  {DRONE_MODELS.map((model) => (
+                    <option key={model} value={model}>
+                      {formatDroneModel(model)}
+                    </option>
+                  ))}
+                  {/* Show custom model if not in known models list */}
+                  {formData.drone_model && !DRONE_MODELS.includes(formData.drone_model) && (
+                    <option value={formData.drone_model}>
+                      {formData.drone_model}
+                    </option>
+                  )}
+                </select>
+                {formErrors.drone_model && (
+                  <p className="mt-1 text-sm text-red-600">{formErrors.drone_model}</p>
                 )}
-              </select>
-              {formErrors.drone_model && (
-                <p className="mt-1 text-sm text-red-600">{formErrors.drone_model}</p>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 px-3 py-2 rounded-md">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>Files have different drone models - each will use its detected model</span>
+              </div>
+            )}
           </div>
 
           {/* Serial Number - only show if files need it */}
@@ -1795,8 +1844,8 @@ export default function UploadPage() {
                 placeholder="0.00"
               />
               <span className="text-sm text-gray-500">kg</span>
-              {DRONE_WEIGHTS[formData.drone_model] && (
-                <span className="text-xs text-gray-400">(prefilled for {formData.drone_model})</span>
+              {DRONE_WEIGHTS[effectiveDroneModel] && (
+                <span className="text-xs text-gray-400">(prefilled for {formatDroneModel(effectiveDroneModel)})</span>
               )}
             </div>
             {setupData.droneWeight <= 0 && (
@@ -1825,7 +1874,7 @@ export default function UploadPage() {
               }`}
             >
               <option value="">Select power source</option>
-              {(DRONE_WEIGHTS[formData.drone_model] ? POWER_OPTIONS[formData.drone_model] : getAllPowerOptions())?.map(opt => (
+              {(DRONE_WEIGHTS[effectiveDroneModel] ? POWER_OPTIONS[effectiveDroneModel] : getAllPowerOptions())?.map(opt => (
                 <option key={opt.id} value={opt.id}>
                   {opt.label} ({opt.weight} kg)
                 </option>

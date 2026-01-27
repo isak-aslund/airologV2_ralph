@@ -4,7 +4,24 @@ import { updateLog } from '../api/logs'
 import { getPilots } from '../api/pilots'
 import TagInput from './TagInput'
 
-const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
+// Known drone models as SYS_AUTOSTART values
+const DRONE_MODELS: DroneModel[] = ['4006', '4010', '4030']  // XLT, S1, CX10
+
+// Map SYS_AUTOSTART values to model names (for display)
+const AUTOSTART_TO_MODEL: Record<string, string> = {
+  '4006': 'XLT',
+  '4010': 'S1',
+  '4030': 'CX10',
+}
+
+// Format drone model for display: "4030 [CX10]" or just the number for unknown
+const formatDroneModel = (autostart: string): string => {
+  const modelName = AUTOSTART_TO_MODEL[autostart]
+  if (modelName) {
+    return `${autostart} [${modelName}]`
+  }
+  return autostart
+}
 
 interface EditLogModalProps {
   log: FlightLog
@@ -272,13 +289,13 @@ export default function EditLogModal({ log, onClose, onSaved }: EditLogModalProp
                 >
                   {DRONE_MODELS.map((model) => (
                     <option key={model} value={model}>
-                      {model}
+                      {formatDroneModel(model)}
                     </option>
                   ))}
                   {/* Show custom model if not in known models list */}
                   {formData.drone_model && !DRONE_MODELS.includes(formData.drone_model as DroneModel) && (
                     <option value={formData.drone_model}>
-                      {formData.drone_model}
+                      {formatDroneModel(formData.drone_model)}
                     </option>
                   )}
                 </select>

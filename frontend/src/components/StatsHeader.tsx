@@ -2,7 +2,24 @@ import { useEffect, useState } from 'react'
 import { getStats } from '../api/stats'
 import type { Stats, DroneModel } from '../types'
 
-const DRONE_MODELS: DroneModel[] = ['XLT', 'S1', 'CX10']
+// Known drone models as SYS_AUTOSTART values
+const DRONE_MODELS: DroneModel[] = ['4006', '4010', '4030']  // XLT, S1, CX10
+
+// Map SYS_AUTOSTART values to model names (for images and display)
+const AUTOSTART_TO_MODEL: Record<string, string> = {
+  '4006': 'XLT',
+  '4010': 'S1',
+  '4030': 'CX10',
+}
+
+// Format drone model for display: "4030 [CX10]" or just the number for unknown
+const formatDroneModel = (autostart: string): string => {
+  const modelName = AUTOSTART_TO_MODEL[autostart]
+  if (modelName) {
+    return `${autostart} [${modelName}]`
+  }
+  return autostart
+}
 
 function formatHours(hours: number): string {
   return hours.toFixed(1)
@@ -99,8 +116,8 @@ export default function StatsHeader() {
               {/* Show image for known models, icon for custom models */}
               {DRONE_MODELS.includes(model as DroneModel) ? (
                 <img
-                  src={`/img/${model}.png`}
-                  alt={`${model} drone`}
+                  src={`/img/${AUTOSTART_TO_MODEL[model]}.png`}
+                  alt={`${AUTOSTART_TO_MODEL[model]} drone`}
                   className="w-10 h-10 object-contain"
                 />
               ) : (
@@ -111,7 +128,7 @@ export default function StatsHeader() {
                 </div>
               )}
               <div>
-                <p className="text-xs text-gray-500 font-medium">{model}</p>
+                <p className="text-xs text-gray-500 font-medium">{formatDroneModel(model)}</p>
                 <p className="text-lg font-semibold text-gray-900">
                   {formatHours(hours)} hrs
                 </p>

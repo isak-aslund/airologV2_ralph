@@ -3,6 +3,22 @@ import { getPilots, getDroneModels } from '../api/pilots'
 import { getTags } from '../api/tags'
 import type { Tag } from '../types'
 
+// Map SYS_AUTOSTART values to model names (for display hints)
+const AUTOSTART_TO_MODEL: Record<string, string> = {
+  '4006': 'XLT',
+  '4010': 'S1',
+  '4030': 'CX10',
+}
+
+// Format drone model for display: "4030 [CX10]" or just the number for unknown
+const formatDroneModel = (autostart: string): string => {
+  const modelName = AUTOSTART_TO_MODEL[autostart]
+  if (modelName) {
+    return `${autostart} [${modelName}]`
+  }
+  return autostart
+}
+
 // Available flight modes (matching backend FLIGHT_MODES)
 const FLIGHT_MODES = [
   'Manual', 'Altitude', 'Position', 'Mission', 'Loiter',
@@ -310,7 +326,7 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
                 <option value="">All models</option>
                 {droneModels.map((model) => (
                   <option key={model} value={model}>
-                    {model}
+                    {formatDroneModel(model)}
                   </option>
                 ))}
               </select>
