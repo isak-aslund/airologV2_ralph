@@ -170,6 +170,32 @@ import re
 SERIAL_NUMBER_REGEX = re.compile(r"^\d{10}$")
 
 
+def sanitize_filename(filename: str) -> str:
+    """Remove path separators and problematic characters."""
+    # Remove directory components
+    name = Path(filename).name
+    # Replace problematic chars with underscore
+    for char in ['<', '>', ':', '"', '|', '?', '*']:
+        name = name.replace(char, '_')
+    return name
+
+
+def get_unique_filepath(directory: Path, filename: str) -> Path:
+    """Return unique filepath, adding _2, _3 etc if file exists."""
+    path = directory / filename
+    if not path.exists():
+        return path
+
+    stem = path.stem  # "log_001"
+    suffix = path.suffix  # ".ulg"
+    counter = 2
+    while True:
+        new_path = directory / f"{stem}_{counter}{suffix}"
+        if not new_path.exists():
+            return new_path
+        counter += 1
+
+
 def is_valid_serial_format(serial: str | None) -> bool:
     """Check if serial number has valid format (exactly 10 digits)."""
     if not serial:
@@ -250,7 +276,7 @@ async def create_log(
     Upload a new flight log.
 
     Accepts multipart form data with the .ulg file and metadata.
-    Saves file to data/logs/{uuid}.ulg, extracts metadata, creates DB record.
+    Saves file to data/logs/{serial_number}/{original_filename}.ulg, extracts metadata, creates DB record.
     """
     # Validate file type
     if not file.filename or not file.filename.endswith(".ulg"):
@@ -277,11 +303,11 @@ async def create_log(
     # Ensure upload directory exists
     settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Save file to data/logs/{uuid}.ulg
-    file_path = settings.UPLOAD_DIR / f"{log_id}.ulg"
+    # 1. Save file to temp location first (using UUID)
+    temp_path = settings.UPLOAD_DIR / f"{log_id}.ulg"
     try:
         content = await file.read()
-        with open(file_path, "wb") as f:
+        with open(temp_path, "wb") as f:
             f.write(content)
     except Exception as e:
         raise HTTPException(
@@ -289,18 +315,18 @@ async def create_log(
             detail=f"Failed to save file: {str(e)}",
         )
 
-    # Extract metadata from the file
-    metadata = extract_metadata(file_path, original_filename=file.filename)
+    # 2. Extract metadata from the file (to get serial if not provided)
+    metadata = extract_metadata(temp_path, original_filename=file.filename)
 
     # Determine final serial number (form value or metadata fallback)
     final_serial_number = serial_number or metadata.get("serial_number")
 
-    # Validate serial number format and value
+    # 3. Validate serial number format and value
     serial_error = validate_serial_number(final_serial_number)
     if serial_error:
-        # Clean up the file we just saved
+        # Clean up the temp file
         try:
-            file_path.unlink()
+            temp_path.unlink()
         except Exception:
             pass
         raise HTTPException(
@@ -308,22 +334,30 @@ async def create_log(
             detail=f"Invalid serial number: {serial_error}. Serial numbers must be exactly 10 digits.",
         )
 
-    # Check for duplicate: same serial_number + log_identifier
+    # 4. Check for duplicate: same serial_number + log_identifier
     existing_log = db.query(FlightLog).filter(
         FlightLog.serial_number == final_serial_number,
         FlightLog.log_identifier == log_identifier,
     ).first()
 
     if existing_log:
-        # Clean up the file we just saved
+        # Clean up the temp file
         try:
-            file_path.unlink()
+            temp_path.unlink()
         except Exception:
             pass
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Log already exists in database. A log with serial number '{final_serial_number}' and identifier '{log_identifier}' is already uploaded.",
         )
+
+    # 5. Move file to final location: data/logs/{serial_number}/{original_filename}.ulg
+    safe_filename = sanitize_filename(file.filename)
+    serial_dir = settings.UPLOAD_DIR / final_serial_number
+    serial_dir.mkdir(parents=True, exist_ok=True)
+    final_path = get_unique_filepath(serial_dir, safe_filename)
+    temp_path.rename(final_path)
+    file_path = final_path
 
     # Parse tags from comma-separated string
     tag_names: list[str] = []
