@@ -6,6 +6,7 @@ import type { ConnectionState, DroneLogEntry, DownloadProgress, DownloadedLog } 
 interface DroneLogsPanelProps {
   onLogsSelected?: (logs: DroneLogEntry[]) => void
   onLogsDownloaded?: (logs: DownloadedLog[]) => void
+  stagedLogIds?: Set<number>
 }
 
 // Download state for tracking multiple log downloads
@@ -49,7 +50,7 @@ function formatDate(utcSeconds: number): string {
 type SortColumn = 'id' | 'date' | 'size'
 type SortDirection = 'asc' | 'desc'
 
-export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: DroneLogsPanelProps) {
+export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded, stagedLogIds }: DroneLogsPanelProps) {
   const navigate = useNavigate()
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
   const [droneSysId, setDroneSysId] = useState<number | null>(null)
@@ -574,6 +575,9 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
                 <th scope="col" className="w-10 px-3 py-2 text-left">
                   <span className="sr-only">Select</span>
                 </th>
+                <th scope="col" className="w-10 px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Staged
+                </th>
                 <th
                   scope="col"
                   className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
@@ -635,6 +639,25 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded }: Dro
                       onClick={(e) => e.stopPropagation()}
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                     />
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    {stagedLogIds?.has(log.id) && (
+                      <span title="Downloaded log and added to staging area">
+                        <svg
+                          className="w-5 h-5 text-green-500 inline-block"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
                     {log.id}

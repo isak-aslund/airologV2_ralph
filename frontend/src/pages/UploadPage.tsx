@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { createLog, extractMetadata } from '../api/logs'
 import { getPilots } from '../api/pilots'
@@ -127,6 +127,24 @@ export default function UploadPage() {
   const getTitleFromFilename = (filename: string): string => {
     return filename.replace(/\.ulg$/i, '')
   }
+
+  // Extract drone log ID from filename (format: log_ID_YYYY-MM-DD-HH-MM-SS.ulg)
+  const getLogIdFromFilename = (filename: string): number | null => {
+    const match = filename.match(/^log_(\d+)_/)
+    return match ? parseInt(match[1], 10) : null
+  }
+
+  // Compute set of log IDs currently in staging area
+  const stagedLogIds = useMemo(() => {
+    const ids = new Set<number>()
+    for (const file of selectedFiles) {
+      const logId = getLogIdFromFilename(file.name)
+      if (logId !== null) {
+        ids.add(logId)
+      }
+    }
+    return ids
+  }, [selectedFiles])
 
   // Get or create override for a file
   const getFileOverride = (filename: string): FileOverride => {
@@ -719,7 +737,7 @@ export default function UploadPage() {
 
       {/* Drone Logs Panel - shown when drone is connected */}
       <div className="mb-6">
-        <DroneLogsPanel onLogsDownloaded={handleDroneLogsDownloaded} />
+        <DroneLogsPanel onLogsDownloaded={handleDroneLogsDownloaded} stagedLogIds={stagedLogIds} />
       </div>
 
       {/* Defaults for all files - shown when files are selected */}
