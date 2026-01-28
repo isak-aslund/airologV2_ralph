@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { FlightLog, DroneModel } from '../types'
+import WeatherModal from './WeatherModal'
 
 // Known drone models as SYS_AUTOSTART values
 const KNOWN_DRONE_MODELS: DroneModel[] = ['4006', '4010', '4030']  // XLT, S1, CX10
@@ -138,6 +139,11 @@ function formatDate(dateStr: string | null): string {
   return date.toISOString().split('T')[0]
 }
 
+// Check if weather data is available for a log
+function hasWeatherData(log: FlightLog): boolean {
+  return log.takeoff_lat !== null && log.takeoff_lon !== null && log.flight_date !== null
+}
+
 // Truncate comment to 50 characters
 function truncateComment(comment: string | null): { text: string; isTruncated: boolean; original: string | null } {
   if (!comment) {
@@ -218,6 +224,8 @@ export default function FlightLogTable({
   onOpenFlightReview,
   uploadingFlightReviewId,
 }: FlightLogTableProps) {
+  const [weatherLog, setWeatherLog] = useState<FlightLog | null>(null)
+
   if (loading) {
     return <TableSkeleton />
   }
@@ -426,6 +434,18 @@ export default function FlightLogTable({
                       </svg>
                     </button>
                   )}
+                  {/* Weather - show historical weather for flight location and date */}
+                  {hasWeatherData(log) && (
+                    <button
+                      onClick={() => setWeatherLog(log)}
+                      className="p-1 text-gray-400 hover:text-amber-600"
+                      title="View Historical Weather"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+                      </svg>
+                    </button>
+                  )}
                   {/* Flight Review - upload first if needed, then open */}
                   {uploadingFlightReviewId === log.id ? (
                     <span className="p-1 text-indigo-600" title="Uploading to Flight Review...">
@@ -463,6 +483,17 @@ export default function FlightLogTable({
           ))}
         </tbody>
       </table>
+
+      {/* Weather Modal */}
+      {weatherLog && weatherLog.takeoff_lat !== null && weatherLog.takeoff_lon !== null && weatherLog.flight_date && (
+        <WeatherModal
+          lat={weatherLog.takeoff_lat}
+          lon={weatherLog.takeoff_lon}
+          date={weatherLog.flight_date}
+          logTitle={weatherLog.title}
+          onClose={() => setWeatherLog(null)}
+        />
+      )}
     </div>
   )
 }
