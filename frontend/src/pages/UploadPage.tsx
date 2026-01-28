@@ -248,7 +248,13 @@ export default function UploadPage() {
   const formatDate = (dateStr: string): string => {
     try {
       const date = new Date(dateStr)
-      return date.toLocaleString()
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      const hours = String(date.getHours()).padStart(2, '0')
+      const minutes = String(date.getMinutes()).padStart(2, '0')
+      const seconds = String(date.getSeconds()).padStart(2, '0')
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
     } catch {
       return dateStr
     }
@@ -1284,10 +1290,10 @@ export default function UploadPage() {
                           {/* Metadata preview row */}
                           <div className="mt-1">
                             {isFileLoading ? (
-                              // Loading spinner
-                              <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                              // Loading state - prominent indicator
+                              <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-md animate-pulse">
                                 <svg
-                                  className="animate-spin h-3 w-3"
+                                  className="animate-spin h-4 w-4 text-blue-600"
                                   xmlns="http://www.w3.org/2000/svg"
                                   fill="none"
                                   viewBox="0 0 24 24"
@@ -1306,7 +1312,7 @@ export default function UploadPage() {
                                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                                   />
                                 </svg>
-                                <span>Extracting metadata...</span>
+                                <span className="text-xs font-medium text-blue-700">Extracting metadata...</span>
                               </div>
                             ) : fileError ? (
                               // Error state
