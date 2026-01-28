@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import type { FlightLog, DroneModel } from '../types'
 import { updateLog } from '../api/logs'
 import { getPilots } from '../api/pilots'
+import { formatDateISO } from '../utils/date'
 import TagInput from './TagInput'
 
 // Known drone models as SYS_AUTOSTART values
@@ -143,17 +144,6 @@ export default function EditLogModal({ log, onClose, onSaved }: EditLogModalProp
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
 
-  // Format date
-  const formatDate = (dateStr: string | null): string => {
-    if (!dateStr) return 'N/A'
-    try {
-      const date = new Date(dateStr)
-      return date.toLocaleDateString()
-    } catch {
-      return dateStr
-    }
-  }
-
   // Format coordinates
   const formatCoordinates = (lat: number | null, lon: number | null): string => {
     if (lat === null || lon === null) return 'N/A'
@@ -202,7 +192,7 @@ export default function EditLogModal({ log, onClose, onSaved }: EditLogModalProp
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">Flight Date</p>
-                  <p className="text-sm font-medium text-gray-900">{formatDate(log.flight_date)}</p>
+                  <p className="text-sm font-medium text-gray-900">{formatDateISO(log.flight_date)}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">Serial Number</p>

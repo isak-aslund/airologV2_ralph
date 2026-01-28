@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getDroneConnection } from '../lib/droneConnection'
+import { formatDateISO } from '../utils/date'
 import type { ConnectionState, DroneLogEntry, DownloadProgress, DownloadedLog } from '../lib/droneConnection'
 
 interface DroneLogsPanelProps {
@@ -30,20 +31,6 @@ function formatSize(bytes: number): string {
     return `${(bytes / 1024).toFixed(1)} KB`
   }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-// Format UTC timestamp to readable date with time
-function formatDate(utcSeconds: number): string {
-  if (utcSeconds === 0) {
-    return '--'
-  }
-  const date = new Date(utcSeconds * 1000)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
-  return `${year}-${month}-${day} ${hours}:${minutes}`
 }
 
 // Sort column type
@@ -663,7 +650,7 @@ export default function DroneLogsPanel({ onLogsSelected, onLogsDownloaded, stage
                     {log.id}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
-                    {formatDate(log.timeUtc)}
+                    {formatDateISO(log.timeUtc)}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
                     {formatSize(log.size)}

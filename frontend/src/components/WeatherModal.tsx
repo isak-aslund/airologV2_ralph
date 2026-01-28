@@ -10,6 +10,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts'
+import { formatDateISO } from '../utils/date'
 
 interface WeatherModalProps {
   lat: number
@@ -28,15 +29,6 @@ interface WeatherData {
   temperature_2m: number | null
 }
 
-function formatDateDisplay(dateStr: string): string {
-  const date = new Date(dateStr)
-  return date.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
-}
 
 export default function WeatherModal({ lat, lon, date, logTitle, onClose }: WeatherModalProps) {
   const [loading, setLoading] = useState(true)
@@ -194,7 +186,7 @@ export default function WeatherModal({ lat, lon, date, logTitle, onClose }: Weat
                 Historical Weather
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                {logTitle} - {formatDateDisplay(date)}
+                {logTitle} - {formatDateISO(date)}
               </p>
               <p className="text-xs text-gray-400 mt-0.5">
                 Location: {lat.toFixed(4)}, {lon.toFixed(4)}

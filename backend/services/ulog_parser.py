@@ -317,16 +317,47 @@ def extract_metadata(
 
 def get_parameters(file_path: str | Path) -> dict[str, Any]:
     """
-    Get all parameters from a .ulg file.
+    Get all parameters from a .ulg file with default values.
 
     Args:
         file_path: Path to the .ulg file
 
     Returns:
-        Dictionary of all parameters (key=param name, value=param value)
+        Dictionary with:
+        - parameters: dict of param name -> {value, firmwareDefault, frameDefault, modifiedFromFirmware, modifiedFromFrame}
     """
     try:
         ulog = ULog(str(file_path))
-        return dict(ulog.initial_parameters)
+        initial_params = dict(ulog.initial_parameters)
+
+        # Get defaults if available
+        firmware_defaults: dict[str, Any] = {}
+        frame_defaults: dict[str, Any] = {}
+        if ulog.has_default_parameters:
+            try:
+                # Type 0 = system defaults (firmware defaults)
+                firmware_defaults = ulog.get_default_parameters(0)
+            except Exception:
+                pass
+            try:
+                # Type 1 = current_setup defaults (frame/airframe defaults)
+                frame_defaults = ulog.get_default_parameters(1)
+            except Exception:
+                pass
+
+        # Build result with value, defaults, and modified flags
+        result: dict[str, dict[str, Any]] = {}
+        for name, value in initial_params.items():
+            firmware_default = firmware_defaults.get(name)
+            frame_default = frame_defaults.get(name)
+            result[name] = {
+                "value": value,
+                "firmwareDefault": firmware_default,
+                "frameDefault": frame_default,
+                "modifiedFromFirmware": firmware_default is not None and firmware_default != value,
+                "modifiedFromFrame": frame_default is not None and frame_default != value,
+            }
+
+        return result
     except Exception:
         return {}

@@ -1,5 +1,19 @@
 import { useEffect, useState, useMemo } from 'react'
-import { getParameters } from '../api/logs'
+import { getParameters, type ParameterData } from '../api/logs'
+
+/**
+ * Format parameter value for display.
+ * Rounds floats to reasonable precision.
+ */
+function formatValue(value: unknown): string {
+  if (typeof value === 'number') {
+    // Round floats to 6 decimal places max, remove trailing zeros
+    if (!Number.isInteger(value)) {
+      return parseFloat(value.toFixed(6)).toString()
+    }
+  }
+  return String(value)
+}
 
 interface ParameterModalProps {
   logId: string
@@ -7,11 +21,14 @@ interface ParameterModalProps {
   onClose: () => void
 }
 
+type FilterMode = 'all' | 'modified'
+
 export default function ParameterModal({ logId, logTitle, onClose }: ParameterModalProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [parameters, setParameters] = useState<Record<string, unknown>>({})
+  const [parameters, setParameters] = useState<Record<string, ParameterData>>({})
   const [searchTerm, setSearchTerm] = useState('')
+  const [filterMode, setFilterMode] = useState<FilterMode>('all')
 
   useEffect(() => {
     const fetchParameters = async () => {
@@ -31,17 +48,28 @@ export default function ParameterModal({ logId, logTitle, onClose }: ParameterMo
     fetchParameters()
   }, [logId])
 
-  // Filter parameters by search term
+  // Count modified parameters (from frame defaults - the primary indicator)
+  const modifiedFromFrameCount = useMemo(() => {
+    return Object.values(parameters).filter(p => p.modifiedFromFrame).length
+  }, [parameters])
+
+  // Filter parameters by search term and filter mode
   const filteredParameters = useMemo(() => {
-    const entries = Object.entries(parameters)
-    if (!searchTerm.trim()) {
-      return entries.sort(([a], [b]) => a.localeCompare(b))
+    let entries = Object.entries(parameters)
+
+    // Apply modified filter (based on frame defaults)
+    if (filterMode === 'modified') {
+      entries = entries.filter(([, data]) => data.modifiedFromFrame)
     }
-    const lowerSearch = searchTerm.toLowerCase()
-    return entries
-      .filter(([name]) => name.toLowerCase().includes(lowerSearch))
-      .sort(([a], [b]) => a.localeCompare(b))
-  }, [parameters, searchTerm])
+
+    // Apply search filter
+    if (searchTerm.trim()) {
+      const lowerSearch = searchTerm.toLowerCase()
+      entries = entries.filter(([name]) => name.toLowerCase().includes(lowerSearch))
+    }
+
+    return entries.sort(([a], [b]) => a.localeCompare(b))
+  }, [parameters, searchTerm, filterMode])
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -53,7 +81,7 @@ export default function ParameterModal({ logId, logTitle, onClose }: ParameterMo
 
       {/* Modal */}
       <div className="flex min-h-full items-center justify-center p-4">
-        <div className="relative bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
+        <div className="relative bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b">
             <div>
@@ -74,8 +102,8 @@ export default function ParameterModal({ logId, logTitle, onClose }: ParameterMo
             </button>
           </div>
 
-          {/* Search input */}
-          <div className="p-4 border-b">
+          {/* Search and filter controls */}
+          <div className="p-4 border-b space-y-3">
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -100,12 +128,38 @@ export default function ParameterModal({ logId, logTitle, onClose }: ParameterMo
                 </button>
               )}
             </div>
+
+            {/* Filter toggle */}
+            {!loading && modifiedFromFrameCount > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setFilterMode('all')}
+                  className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                    filterMode === 'all'
+                      ? 'bg-gray-900 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => setFilterMode('modified')}
+                  className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                    filterMode === 'modified'
+                      ? 'bg-amber-500 text-white'
+                      : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                  }`}
+                >
+                  Modified from frame ({modifiedFromFrameCount})
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Content */}
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex-1 overflow-y-auto">
             {loading ? (
-              <div className="flex items-center justify-center py-12">
+              <div className="flex items-center justify-center py-12 px-4">
                 <svg className="animate-spin h-8 w-8 text-blue-500" fill="none" viewBox="0 0 24 24">
                   <circle
                     className="opacity-25"
@@ -123,11 +177,11 @@ export default function ParameterModal({ logId, logTitle, onClose }: ParameterMo
                 </svg>
               </div>
             ) : error ? (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+              <div className="p-4 mx-4 mt-4 bg-red-50 border border-red-200 rounded-lg">
                 <p className="text-sm text-red-600">{error}</p>
               </div>
             ) : filteredParameters.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
+              <div className="text-center py-8 px-4 text-gray-500">
                 {searchTerm ? (
                   <p>No parameters found matching "{searchTerm}"</p>
                 ) : (
@@ -136,24 +190,48 @@ export default function ParameterModal({ logId, logTitle, onClose }: ParameterMo
               </div>
             ) : (
               <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50 sticky top-0">
+                <thead className="bg-gray-50 sticky top-0 shadow-sm">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                       Name
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                       Value
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                      Frame Default
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                      Firmware Default
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredParameters.map(([name, value], index) => (
-                    <tr key={name} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                  {filteredParameters.map(([name, data], index) => (
+                    <tr
+                      key={name}
+                      className={`${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${
+                        data.modifiedFromFrame ? 'border-l-2 border-l-amber-400' : ''
+                      }`}
+                    >
                       <td className="px-4 py-2 text-sm font-mono text-gray-900 whitespace-nowrap">
-                        {name}
+                        <span className="flex items-center gap-2">
+                          {name}
+                          {data.modifiedFromFrame && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
+                              modified
+                            </span>
+                          )}
+                        </span>
                       </td>
-                      <td className="px-4 py-2 text-sm font-mono text-gray-600">
-                        {String(value)}
+                      <td className={`px-4 py-2 text-sm font-mono ${data.modifiedFromFrame ? 'text-amber-700 font-medium' : 'text-gray-600'}`}>
+                        {formatValue(data.value)}
+                      </td>
+                      <td className="px-4 py-2 text-sm font-mono text-gray-400">
+                        {data.frameDefault !== null ? formatValue(data.frameDefault) : '-'}
+                      </td>
+                      <td className="px-4 py-2 text-sm font-mono text-gray-400">
+                        {data.firmwareDefault !== null ? formatValue(data.firmwareDefault) : '-'}
                       </td>
                     </tr>
                   ))}

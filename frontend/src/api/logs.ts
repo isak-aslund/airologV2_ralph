@@ -65,10 +65,22 @@ export async function downloadLog(id: string): Promise<Blob> {
 }
 
 /**
- * Get parameters from the ULog file for a flight log.
+ * Parameter data with value, defaults, and modified flags.
  */
-export async function getParameters(id: string): Promise<Record<string, unknown>> {
-  const response = await client.get<Record<string, unknown>>(`/logs/${id}/parameters`)
+export interface ParameterData {
+  value: unknown
+  firmwareDefault: unknown | null
+  frameDefault: unknown | null
+  modifiedFromFirmware: boolean
+  modifiedFromFrame: boolean
+}
+
+/**
+ * Get parameters from the ULog file for a flight log.
+ * Returns parameters with their values, defaults, and modified status.
+ */
+export async function getParameters(id: string): Promise<Record<string, ParameterData>> {
+  const response = await client.get<Record<string, ParameterData>>(`/logs/${id}/parameters`)
   return response.data
 }
 

@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { createLog, extractMetadata, checkDuplicates } from '../api/logs'
 import { getPilots } from '../api/pilots'
+import { formatDateISO } from '../utils/date'
 import TagInput from '../components/TagInput'
 import DroneLogsPanel from '../components/DroneLogsPanel'
 import type { DownloadedLog } from '../lib/droneConnection'
@@ -243,21 +244,6 @@ export default function UploadPage() {
       return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
     }
     return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
-
-  const formatDate = (dateStr: string): string => {
-    try {
-      const date = new Date(dateStr)
-      const year = date.getFullYear()
-      const month = String(date.getMonth() + 1).padStart(2, '0')
-      const day = String(date.getDate()).padStart(2, '0')
-      const hours = String(date.getHours()).padStart(2, '0')
-      const minutes = String(date.getMinutes()).padStart(2, '0')
-      const seconds = String(date.getSeconds()).padStart(2, '0')
-      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
-    } catch {
-      return dateStr
-    }
   }
 
   const formatCoordinates = (lat: number | null, lon: number | null): string | null => {
@@ -1338,7 +1324,7 @@ export default function UploadPage() {
                                     <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                     </svg>
-                                    {formatDate(fileMetadata.flight_date)}
+                                    {formatDateISO(fileMetadata.flight_date)}
                                   </span>
                                 )}
                                 {fileMetadata.drone_model && (

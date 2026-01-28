@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { FlightLog, DroneModel } from '../types'
+import { formatDateISO } from '../utils/date'
 import WeatherModal from './WeatherModal'
+import MapModal from './MapModal'
 
 // Known drone models as SYS_AUTOSTART values
 const KNOWN_DRONE_MODELS: DroneModel[] = ['4006', '4010', '4030']  // XLT, S1, CX10
@@ -130,18 +132,15 @@ function formatDuration(seconds: number | null): string {
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
 }
 
-// Format date to YYYY-MM-DD
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) {
-    return '--'
-  }
-  const date = new Date(dateStr)
-  return date.toISOString().split('T')[0]
+
+// Check if GPS location is available for a log
+function hasGpsData(log: FlightLog): boolean {
+  return log.takeoff_lat !== null && log.takeoff_lon !== null
 }
 
-// Check if weather data is available for a log
+// Check if weather data is available for a log (needs GPS + date)
 function hasWeatherData(log: FlightLog): boolean {
-  return log.takeoff_lat !== null && log.takeoff_lon !== null && log.flight_date !== null
+  return hasGpsData(log) && log.flight_date !== null
 }
 
 // Truncate comment to 50 characters
@@ -225,6 +224,7 @@ export default function FlightLogTable({
   uploadingFlightReviewId,
 }: FlightLogTableProps) {
   const [weatherLog, setWeatherLog] = useState<FlightLog | null>(null)
+  const [mapLog, setMapLog] = useState<FlightLog | null>(null)
 
   if (loading) {
     return <TableSkeleton />
@@ -385,7 +385,7 @@ export default function FlightLogTable({
               </td>
               {/* Date */}
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
-                {formatDate(log.flight_date)}
+                {formatDateISO(log.flight_date)}
               </td>
               {/* Actions - placeholder buttons for now, will be enhanced in US-016 */}
               <td className="px-3 py-2 whitespace-nowrap text-sm">
@@ -431,6 +431,19 @@ export default function FlightLogTable({
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                      </svg>
+                    </button>
+                  )}
+                  {/* Map - show GPS location on map */}
+                  {hasGpsData(log) && (
+                    <button
+                      onClick={() => setMapLog(log)}
+                      className="p-1 text-gray-400 hover:text-emerald-600"
+                      title="View on Map"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                       </svg>
                     </button>
                   )}
@@ -492,6 +505,17 @@ export default function FlightLogTable({
           date={weatherLog.flight_date}
           logTitle={weatherLog.title}
           onClose={() => setWeatherLog(null)}
+        />
+      )}
+
+      {/* Map Modal */}
+      {mapLog && mapLog.takeoff_lat !== null && mapLog.takeoff_lon !== null && (
+        <MapModal
+          lat={mapLog.takeoff_lat}
+          lon={mapLog.takeoff_lon}
+          logTitle={mapLog.title}
+          flightDate={mapLog.flight_date}
+          onClose={() => setMapLog(null)}
         />
       )}
     </div>
