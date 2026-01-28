@@ -618,9 +618,8 @@ export default function UploadPage() {
   // Files that can be uploaded (not duplicates and have valid serial)
   const uploadableFiles = selectedFiles.filter(file => hasValidSerialNumber(file.name) && !isFileDuplicate(file.name))
 
-  // Check if all files have a valid drone model (from override, default, or detected metadata)
+  // Check if all files have a valid drone model (from override or detected metadata)
   const allFilesHaveDroneModel = useMemo(() => {
-    if (formData.drone_model) return true  // Default is set, all files will use it
     // Check each file has its own drone model
     return selectedFiles.every(file => {
       const override = fileOverrides.get(file.name)
@@ -628,7 +627,7 @@ export default function UploadPage() {
       const metadata = fileMetadataStates.get(file.name)?.metadata
       return metadata?.drone_model && metadata.drone_model !== 'unknown'
     })
-  }, [formData.drone_model, selectedFiles, fileOverrides, fileMetadataStates])
+  }, [selectedFiles, fileOverrides, fileMetadataStates])
 
   // Check if upload is valid (defaults set + files selected + all have valid serial numbers + no duplicates)
   const isBatchUploadValid = formData.pilot.trim() && allFilesHaveDroneModel && uploadableFiles.length > 0 && allFilesHaveValidSerialNumbers && duplicateFileCount === 0 && isSetupValid
@@ -1707,45 +1706,6 @@ export default function UploadPage() {
               )}
             </div>
 
-            {/* Drone Model - only show if all files have the same model */}
-            {allFilesSameDroneModel ? (
-              <div>
-                <label htmlFor="default-drone-model" className="block text-sm font-medium text-gray-700 mb-1">
-                  Drone Model <span className="text-red-500">*</span>
-                </label>
-                <select
-                  id="default-drone-model"
-                  value={formData.drone_model}
-                  onChange={(e) => handleFormChange('drone_model', e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    formErrors.drone_model ? 'border-red-500' : 'border-gray-300'
-                  }`}
-                >
-                  <option value="">Select drone model</option>
-                  {DRONE_MODELS.map((model) => (
-                    <option key={model} value={model}>
-                      {formatDroneModel(model)}
-                    </option>
-                  ))}
-                  {/* Show custom model if not in known models list */}
-                  {formData.drone_model && !DRONE_MODELS.includes(formData.drone_model) && (
-                    <option value={formData.drone_model}>
-                      {formData.drone_model}
-                    </option>
-                  )}
-                </select>
-                {formErrors.drone_model && (
-                  <p className="mt-1 text-sm text-red-600">{formErrors.drone_model}</p>
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 px-3 py-2 rounded-md">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span>Files have different drone models - each will use its detected model</span>
-              </div>
-            )}
           </div>
 
           {/* Serial Number - only show if files need it */}
