@@ -258,7 +258,7 @@ export default function WeatherModal({ lat, lon, date, logTitle, onClose }: Weat
                             borderRadius: '6px',
                             fontSize: '12px',
                           }}
-                          formatter={(value: number) => [`${value?.toFixed(1)} ${units.wind}`, '']}
+                          formatter={(value) => [`${(value as number)?.toFixed(1)} ${units.wind}`, '']}
                           labelFormatter={(label) => `Time: ${label}`}
                         />
                         <Legend wrapperStyle={{ fontSize: '12px' }} />
@@ -318,7 +318,7 @@ export default function WeatherModal({ lat, lon, date, logTitle, onClose }: Weat
                             borderRadius: '6px',
                             fontSize: '12px',
                           }}
-                          formatter={(value: number) => [`${value?.toFixed(1)}${units.temp}`, 'Temperature']}
+                          formatter={(value) => [`${(value as number)?.toFixed(1)}${units.temp}`, 'Temperature']}
                           labelFormatter={(label) => `Time: ${label}`}
                         />
                         <Line
