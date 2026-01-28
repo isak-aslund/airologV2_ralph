@@ -11,11 +11,18 @@ export const MAVLINK_STX_V1 = 0xfe // MAVLink v1 start byte (for compatibility)
 
 // Message IDs
 export const MSG_ID_HEARTBEAT = 0
+export const MSG_ID_PARAM_REQUEST_READ = 20
+export const MSG_ID_PARAM_VALUE = 22
+export const MSG_ID_PARAM_SET = 23
 export const MSG_ID_LOG_REQUEST_LIST = 117
 export const MSG_ID_LOG_ENTRY = 118
 export const MSG_ID_LOG_REQUEST_DATA = 119
 export const MSG_ID_LOG_DATA = 120
 export const MSG_ID_LOG_REQUEST_END = 122
+
+// MAVLink parameter types
+export const MAV_PARAM_TYPE_INT32 = 6
+export const MAV_PARAM_TYPE_REAL32 = 9
 
 // Component IDs
 export const MAV_COMP_ID_AUTOPILOT1 = 1
@@ -31,6 +38,9 @@ export const MAV_AUTOPILOT_INVALID = 8
 // These values are from mavlink generator and are specific to each message
 const CRC_EXTRA: Record<number, number> = {
   [MSG_ID_HEARTBEAT]: 50,
+  [MSG_ID_PARAM_REQUEST_READ]: 214,
+  [MSG_ID_PARAM_VALUE]: 220,
+  [MSG_ID_PARAM_SET]: 168,
   [MSG_ID_LOG_REQUEST_LIST]: 128,
   [MSG_ID_LOG_ENTRY]: 56,
   [MSG_ID_LOG_REQUEST_DATA]: 116,
@@ -69,6 +79,14 @@ export interface LogDataMessage {
   ofs: number
   count: number
   data: Uint8Array
+}
+
+export interface ParamValueMessage {
+  paramId: string
+  paramValue: number // float representation
+  paramCount: number
+  paramIndex: number
+  paramType: number
 }
 
 /**
@@ -397,4 +415,151 @@ export function parseHeartbeat(payload: Uint8Array): HeartbeatMessage | null {
     systemStatus: payload[7],
     mavlinkVersion: payload[8],
   }
+}
+
+/**
+ * Parse a PARAM_VALUE message payload
+ * MAVLink wire format (sorted by type size):
+ * param_value: float (offset 0-3)
+ * param_count: uint16 (offset 4-5)
+ * param_index: uint16 (offset 6-7)
+ * param_id: char[16] (offset 8-23)
+ * param_type: uint8 (offset 24)
+ */
+export function parseParamValue(payload: Uint8Array): ParamValueMessage | null {
+  if (payload.length < 25) return null
+
+  // Parse float value from bytes
+  const floatBytes = new Uint8Array([payload[0], payload[1], payload[2], payload[3]])
+  const floatView = new DataView(floatBytes.buffer)
+  const paramValue = floatView.getFloat32(0, true) // little-endian
+
+  // Parse param_id (null-terminated string)
+  let paramId = ''
+  for (let i = 8; i < 24 && payload[i] !== 0; i++) {
+    paramId += String.fromCharCode(payload[i])
+  }
+
+  return {
+    paramValue,
+    paramCount: payload[4] | (payload[5] << 8),
+    paramIndex: payload[6] | (payload[7] << 8),
+    paramId,
+    paramType: payload[24],
+  }
+}
+
+/**
+ * Create a PARAM_REQUEST_READ message
+ * Requests a single parameter by name
+ *
+ * @param targetSysId - Target system ID (drone)
+ * @param targetCompId - Target component ID
+ * @param paramId - Parameter name (max 16 chars)
+ */
+export function createParamRequestReadMessage(
+  targetSysId: number,
+  targetCompId: number = MAV_COMP_ID_AUTOPILOT1,
+  paramId: string
+): Uint8Array {
+  // PARAM_REQUEST_READ payload - MAVLink wire format (sorted by type size):
+  // param_index: int16 (offset 0-1) - use -1 to request by name
+  // target_system: uint8 (offset 2)
+  // target_component: uint8 (offset 3)
+  // param_id: char[16] (offset 4-19)
+  const payload = new Uint8Array(20)
+
+  // param_index = -1 means request by name
+  payload[0] = 0xff // -1 as int16 little-endian
+  payload[1] = 0xff
+  payload[2] = targetSysId
+  payload[3] = targetCompId
+
+  // Copy param_id (null-padded)
+  const encoder = new TextEncoder()
+  const nameBytes = encoder.encode(paramId)
+  for (let i = 0; i < 16 && i < nameBytes.length; i++) {
+    payload[4 + i] = nameBytes[i]
+  }
+
+  return createMAVLinkMessage(MSG_ID_PARAM_REQUEST_READ, payload, 255, MAV_COMP_ID_ALL, getNextSeq())
+}
+
+/**
+ * Create a PARAM_SET message
+ * Sets a parameter value on the drone
+ *
+ * @param targetSysId - Target system ID (drone)
+ * @param targetCompId - Target component ID
+ * @param paramId - Parameter name (max 16 chars)
+ * @param paramValue - Parameter value as float bytes
+ * @param paramType - Parameter type (MAV_PARAM_TYPE_*)
+ */
+export function createParamSetMessage(
+  targetSysId: number,
+  targetCompId: number = MAV_COMP_ID_AUTOPILOT1,
+  paramId: string,
+  paramValue: number,
+  paramType: number = MAV_PARAM_TYPE_INT32
+): Uint8Array {
+  // PARAM_SET payload - MAVLink wire format (sorted by type size):
+  // param_value: float (offset 0-3)
+  // target_system: uint8 (offset 4)
+  // target_component: uint8 (offset 5)
+  // param_id: char[16] (offset 6-21)
+  // param_type: uint8 (offset 22)
+  const payload = new Uint8Array(23)
+
+  // Write float value
+  const floatView = new DataView(new ArrayBuffer(4))
+  floatView.setFloat32(0, paramValue, true) // little-endian
+  payload[0] = floatView.getUint8(0)
+  payload[1] = floatView.getUint8(1)
+  payload[2] = floatView.getUint8(2)
+  payload[3] = floatView.getUint8(3)
+
+  payload[4] = targetSysId
+  payload[5] = targetCompId
+
+  // Copy param_id (null-padded)
+  const encoder = new TextEncoder()
+  const nameBytes = encoder.encode(paramId)
+  for (let i = 0; i < 16 && i < nameBytes.length; i++) {
+    payload[6 + i] = nameBytes[i]
+  }
+
+  payload[22] = paramType
+
+  return createMAVLinkMessage(MSG_ID_PARAM_SET, payload, 255, MAV_COMP_ID_ALL, getNextSeq())
+}
+
+/**
+ * Convert an integer to float bytes for MAVLink parameter transmission
+ * MAVLink transmits INT32 parameters as the bit-pattern reinterpreted as a float
+ */
+export function intToParamFloat(value: number): number {
+  const buffer = new ArrayBuffer(4)
+  const intView = new DataView(buffer)
+  intView.setInt32(0, value, true) // write as int32 little-endian
+  return intView.getFloat32(0, true) // read as float little-endian
+}
+
+/**
+ * Convert float bytes back to integer for MAVLink parameter reception
+ */
+export function paramFloatToInt(value: number): number {
+  const buffer = new ArrayBuffer(4)
+  const floatView = new DataView(buffer)
+  floatView.setFloat32(0, value, true) // write as float little-endian
+  return floatView.getInt32(0, true) // read as int32 little-endian
+}
+
+/**
+ * Convert float bytes back to unsigned integer for MAVLink parameter reception
+ */
+export function paramFloatToUint(value: number): number {
+  const buffer = new ArrayBuffer(4)
+  const floatView = new DataView(buffer)
+  floatView.setFloat32(0, value, true) // write as float little-endian
+  return floatView.getUint32(0, true) // read as uint32 little-endian
 }

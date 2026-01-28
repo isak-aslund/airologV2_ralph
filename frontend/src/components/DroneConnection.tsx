@@ -6,18 +6,42 @@ import {
 } from '../lib/droneConnection'
 import type { ConnectionState } from '../lib/droneConnection'
 import type { HeartbeatMessage } from '../lib/mavlink'
+import SetSerialModal, { isDefaultSerial } from './SetSerialModal'
 
 export default function DroneConnection() {
   const navigate = useNavigate()
   const location = useLocation()
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
   const [serialNumber, setSerialNumber] = useState<string | null>(null)
+  const [actualSerial, setActualSerial] = useState<number | null>(null)
+  const [hasDefaultSerial, setHasDefaultSerial] = useState(false)
+  const [showSetSerialModal, setShowSetSerialModal] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isSupported] = useState(() => isWebSerialSupported())
   const [hasNavigated, setHasNavigated] = useState(false)
 
   // Get the singleton connection instance
   const connection = getDroneConnection()
+
+  // Read AIROLIT_SERIAL after connection is established
+  const readSerialFromDrone = useCallback(async () => {
+    try {
+      const serial = await connection.readAirolitSerial()
+      setActualSerial(serial)
+
+      if (serial !== null) {
+        setSerialNumber(serial.toString())
+        setHasDefaultSerial(isDefaultSerial(serial))
+      } else {
+        // No serial set, show as default
+        setHasDefaultSerial(true)
+      }
+    } catch (err) {
+      console.warn('Failed to read AIROLIT_SERIAL:', err)
+      // Still show as default so user can set it
+      setHasDefaultSerial(true)
+    }
+  }, [connection])
 
   // Setup event handlers
   useEffect(() => {
@@ -26,14 +50,17 @@ export default function DroneConnection() {
         setConnectionState(state)
         if (state === 'disconnected') {
           setSerialNumber(null)
+          setActualSerial(null)
+          setHasDefaultSerial(false)
           setHasNavigated(false)
         }
       },
       onHeartbeat: (_heartbeat: HeartbeatMessage, sysId: number) => {
-        // Use system ID as the serial number display for now
-        // Real serial number would come from parameter or message parsing
+        // Use system ID as temporary display until we read the actual serial
         if (!serialNumber) {
           setSerialNumber(`SYS-${sysId}`)
+          // Read the actual serial number from the drone
+          readSerialFromDrone()
         }
       },
       onError: (err) => {
@@ -50,7 +77,7 @@ export default function DroneConnection() {
     }
 
     // Cleanup not needed as we're using singleton
-  }, [connection, serialNumber])
+  }, [connection, serialNumber, readSerialFromDrone])
 
   // Navigate to upload page when connected (only once per connection)
   useEffect(() => {
@@ -78,6 +105,13 @@ export default function DroneConnection() {
     await connection.disconnect()
   }, [connection])
 
+  const handleSerialSet = useCallback((newSerial: number) => {
+    setActualSerial(newSerial)
+    setSerialNumber(newSerial.toString())
+    setHasDefaultSerial(false)
+    setShowSetSerialModal(false)
+  }, [])
+
   // Don't render if Web Serial API is not supported
   if (!isSupported) {
     return null
@@ -99,9 +133,33 @@ export default function DroneConnection() {
         />
 
         {connectionState === 'connected' && serialNumber && (
-          <span className="text-xs sm:text-sm text-gray-600 font-mono">
+          <span className={`text-xs sm:text-sm font-mono ${hasDefaultSerial ? 'text-amber-600' : 'text-gray-600'}`}>
             {serialNumber}
           </span>
+        )}
+
+        {/* Set Serial button - shown when connected and serial is a default */}
+        {connectionState === 'connected' && hasDefaultSerial && (
+          <button
+            onClick={() => setShowSetSerialModal(true)}
+            className="flex items-center gap-1 bg-amber-100 hover:bg-amber-200 text-amber-700 px-2 py-1 rounded text-xs font-medium transition-colors"
+            title="Set drone serial number"
+          >
+            <svg
+              className="w-3.5 h-3.5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+              />
+            </svg>
+            <span className="hidden sm:inline">Set Serial</span>
+          </button>
         )}
       </div>
 
@@ -198,6 +256,15 @@ export default function DroneConnection() {
             <span>{error}</span>
           </div>
         </div>
+      )}
+
+      {/* Set Serial Modal */}
+      {showSetSerialModal && (
+        <SetSerialModal
+          currentSerial={actualSerial}
+          onClose={() => setShowSetSerialModal(false)}
+          onSerialSet={handleSerialSet}
+        />
       )}
     </div>
   )

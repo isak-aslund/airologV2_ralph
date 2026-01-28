@@ -10,19 +10,27 @@ import {
   createHeartbeatMessage,
   createLogRequestListMessage,
   createLogRequestDataMessage,
+  createParamRequestReadMessage,
+  createParamSetMessage,
   MSG_ID_HEARTBEAT,
   MSG_ID_LOG_ENTRY,
   MSG_ID_LOG_DATA,
+  MSG_ID_PARAM_VALUE,
   parseHeartbeat,
   parseLogEntry,
   parseLogData,
+  parseParamValue,
+  intToParamFloat,
+  paramFloatToUint,
   MAV_COMP_ID_AUTOPILOT1,
+  MAV_PARAM_TYPE_INT32,
 } from './mavlink'
 import type {
   MAVLinkMessage,
   HeartbeatMessage,
   LogEntryMessage,
   LogDataMessage,
+  ParamValueMessage,
 } from './mavlink'
 
 // Connection constants
@@ -64,6 +72,7 @@ export interface DroneConnectionEvents {
   onHeartbeat?: (heartbeat: HeartbeatMessage, sysId: number) => void
   onLogEntry?: (entry: LogEntryMessage) => void
   onLogData?: (data: LogDataMessage) => void
+  onParamValue?: (param: ParamValueMessage) => void
   onError?: (error: Error) => void
   onMessage?: (message: MAVLinkMessage) => void
 }
@@ -644,6 +653,186 @@ export class DroneConnection {
         }
         break
       }
+
+      case MSG_ID_PARAM_VALUE: {
+        const param = parseParamValue(message.payload)
+        if (param) {
+          console.log('[DroneConnection] Received PARAM_VALUE:', param.paramId, '=', param.paramValue)
+          this.events.onParamValue?.(param)
+        } else {
+          console.warn('[DroneConnection] Failed to parse PARAM_VALUE message')
+        }
+        break
+      }
+    }
+  }
+
+  /**
+   * Request a parameter value from the drone
+   *
+   * @param paramId - Parameter name to request
+   * @param timeout - Timeout in milliseconds
+   * @returns Promise that resolves with the parameter value
+   */
+  async requestParameter(paramId: string, timeout: number = 5000): Promise<ParamValueMessage> {
+    if (this._state !== 'connected') {
+      throw new Error('Not connected')
+    }
+
+    if (this._droneSysId === null) {
+      throw new Error('Drone system ID not yet received. Wait for heartbeat.')
+    }
+
+    return new Promise<ParamValueMessage>((resolve, reject) => {
+      let timeoutId: ReturnType<typeof setTimeout> | null = null
+      const originalOnParamValue = this.events.onParamValue
+
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+          timeoutId = null
+        }
+        this.events.onParamValue = originalOnParamValue
+      }
+
+      timeoutId = setTimeout(() => {
+        cleanup()
+        reject(new Error(`Timeout waiting for parameter: ${paramId}`))
+      }, timeout)
+
+      this.events.onParamValue = (param) => {
+        originalOnParamValue?.(param)
+        if (param.paramId === paramId) {
+          cleanup()
+          resolve(param)
+        }
+      }
+
+      const requestMessage = createParamRequestReadMessage(
+        this._droneSysId!,
+        MAV_COMP_ID_AUTOPILOT1,
+        paramId
+      )
+
+      console.log('[DroneConnection] Requesting parameter:', paramId)
+      this.send(requestMessage).catch((error) => {
+        cleanup()
+        reject(error)
+      })
+    })
+  }
+
+  /**
+   * Set a parameter value on the drone
+   *
+   * @param paramId - Parameter name to set
+   * @param value - Value to set (as MAVLink float representation)
+   * @param paramType - Parameter type
+   * @param timeout - Timeout in milliseconds
+   * @returns Promise that resolves with the confirmed parameter value
+   */
+  async setParameter(
+    paramId: string,
+    value: number,
+    paramType: number = MAV_PARAM_TYPE_INT32,
+    timeout: number = 5000
+  ): Promise<ParamValueMessage> {
+    if (this._state !== 'connected') {
+      throw new Error('Not connected')
+    }
+
+    if (this._droneSysId === null) {
+      throw new Error('Drone system ID not yet received. Wait for heartbeat.')
+    }
+
+    return new Promise<ParamValueMessage>((resolve, reject) => {
+      let timeoutId: ReturnType<typeof setTimeout> | null = null
+      const originalOnParamValue = this.events.onParamValue
+
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+          timeoutId = null
+        }
+        this.events.onParamValue = originalOnParamValue
+      }
+
+      timeoutId = setTimeout(() => {
+        cleanup()
+        reject(new Error(`Timeout waiting for parameter confirmation: ${paramId}`))
+      }, timeout)
+
+      this.events.onParamValue = (param) => {
+        originalOnParamValue?.(param)
+        if (param.paramId === paramId) {
+          cleanup()
+          resolve(param)
+        }
+      }
+
+      const setMessage = createParamSetMessage(
+        this._droneSysId!,
+        MAV_COMP_ID_AUTOPILOT1,
+        paramId,
+        value,
+        paramType
+      )
+
+      console.log('[DroneConnection] Setting parameter:', paramId, '=', value)
+      this.send(setMessage).catch((error) => {
+        cleanup()
+        reject(error)
+      })
+    })
+  }
+
+  /**
+   * Read the AIROLIT_SERIAL parameter from the drone
+   *
+   * @returns Promise that resolves with the serial number as integer, or null if not set
+   */
+  async readAirolitSerial(): Promise<number | null> {
+    try {
+      const param = await this.requestParameter('AIROLIT_SERIAL')
+      const serial = paramFloatToUint(param.paramValue)
+      console.log('[DroneConnection] AIROLIT_SERIAL =', serial)
+      return serial === 0 ? null : serial
+    } catch (error) {
+      console.warn('[DroneConnection] Failed to read AIROLIT_SERIAL:', error)
+      return null
+    }
+  }
+
+  /**
+   * Set the AIROLIT_SERIAL parameter on the drone and verify it was set correctly
+   *
+   * @param serialNumber - The 10-digit serial number to set
+   * @returns Promise that resolves with true if successful, false otherwise
+   */
+  async setAirolitSerial(serialNumber: number): Promise<boolean> {
+    try {
+      // Convert integer to float representation
+      const floatValue = intToParamFloat(serialNumber)
+
+      console.log('[DroneConnection] Setting AIROLIT_SERIAL to', serialNumber, '(float:', floatValue, ')')
+
+      // Set the parameter
+      const response = await this.setParameter('AIROLIT_SERIAL', floatValue, MAV_PARAM_TYPE_INT32)
+
+      // Verify the value was set correctly
+      const confirmedSerial = paramFloatToUint(response.paramValue)
+      console.log('[DroneConnection] Confirmed AIROLIT_SERIAL =', confirmedSerial)
+
+      if (confirmedSerial === serialNumber) {
+        console.log('[DroneConnection] Serial number set successfully')
+        return true
+      } else {
+        console.error('[DroneConnection] Serial mismatch: sent', serialNumber, 'got', confirmedSerial)
+        return false
+      }
+    } catch (error) {
+      console.error('[DroneConnection] Failed to set AIROLIT_SERIAL:', error)
+      return false
     }
   }
 }
