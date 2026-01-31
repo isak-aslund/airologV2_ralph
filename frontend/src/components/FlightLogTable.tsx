@@ -504,6 +504,7 @@ export default function FlightLogTable({
           lon={weatherLog.takeoff_lon}
           date={weatherLog.flight_date}
           logTitle={weatherLog.title}
+          durationSeconds={weatherLog.duration_seconds}
           onClose={() => setWeatherLog(null)}
         />
       )}

@@ -9,6 +9,7 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+  ReferenceArea,
 } from 'recharts'
 import { formatDateISO } from '../utils/date'
 
@@ -17,6 +18,7 @@ interface WeatherModalProps {
   lon: number
   date: string // ISO date string
   logTitle: string
+  durationSeconds: number | null
   onClose: () => void
 }
 
@@ -30,7 +32,7 @@ interface WeatherData {
 }
 
 
-export default function WeatherModal({ lat, lon, date, logTitle, onClose }: WeatherModalProps) {
+export default function WeatherModal({ lat, lon, date, logTitle, durationSeconds, onClose }: WeatherModalProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [weatherData, setWeatherData] = useState<WeatherData[]>([])
@@ -166,6 +168,40 @@ export default function WeatherModal({ lat, lon, date, logTitle, onClose }: Weat
     fetchWeather()
   }, [lat, lon, formattedDate])
 
+  // Compute flight time window for chart highlight using Date object comparison
+  const flightRange = (() => {
+    if (!durationSeconds || weatherData.length === 0) return null
+    const flightStart = new Date(date)
+    if (isNaN(flightStart.getTime())) return null
+
+    // Skip if flight_date is just a date without time (length 10 = "YYYY-MM-DD")
+    if (date.length <= 10) return null
+
+    const flightStartMs = flightStart.getTime()
+    const flightEndMs = flightStartMs + durationSeconds * 1000
+
+    // Find the weather data points whose time brackets the flight window.
+    // Use the timeLabel of the nearest enclosing data points.
+    let startIdx = -1
+    let endIdx = -1
+    for (let i = 0; i < weatherData.length; i++) {
+      const t = weatherData[i].time.getTime()
+      // Last data point at or before flight start
+      if (t <= flightStartMs) startIdx = i
+      // Last data point at or before flight end
+      if (t <= flightEndMs) endIdx = i
+    }
+    // If flight starts before all data points, use the first one
+    if (startIdx === -1) startIdx = 0
+    // If flight ends after all data points, use the last one
+    if (endIdx === -1) endIdx = weatherData.length - 1
+    // Ensure we highlight at least up to the next point after flight end
+    if (endIdx < weatherData.length - 1) endIdx++
+
+    if (startIdx > endIdx) return null
+    return { x1: weatherData[startIdx].timeLabel, x2: weatherData[endIdx].timeLabel }
+  })()
+
   const openMeteoUrl = `https://open-meteo.com/en/docs/historical-forecast-api?latitude=${lat}&longitude=${lon}&start_date=${formattedDate}&end_date=${formattedDate}&minutely_15=temperature_2m,wind_speed_10m,wind_speed_80m,wind_gusts_10m&wind_speed_unit=ms`
 
   return (
@@ -262,6 +298,18 @@ export default function WeatherModal({ lat, lon, date, logTitle, onClose }: Weat
                           labelFormatter={(label) => `Time: ${label}`}
                         />
                         <Legend wrapperStyle={{ fontSize: '12px' }} />
+                        {flightRange && (
+                          <ReferenceArea
+                            x1={flightRange.x1}
+                            x2={flightRange.x2}
+                            fill="#3b82f6"
+                            fillOpacity={0.08}
+                            stroke="#3b82f6"
+                            strokeOpacity={0.3}
+                            strokeDasharray="4 2"
+                            label={{ value: 'Flight', position: 'insideTop', fontSize: 10, fill: '#3b82f6' }}
+                          />
+                        )}
                         <Line
                           type="monotone"
                           dataKey="wind_speed_10m"
@@ -321,6 +369,17 @@ export default function WeatherModal({ lat, lon, date, logTitle, onClose }: Weat
                           formatter={(value) => [`${(value as number)?.toFixed(1)}${units.temp}`, 'Temperature']}
                           labelFormatter={(label) => `Time: ${label}`}
                         />
+                        {flightRange && (
+                          <ReferenceArea
+                            x1={flightRange.x1}
+                            x2={flightRange.x2}
+                            fill="#3b82f6"
+                            fillOpacity={0.08}
+                            stroke="#3b82f6"
+                            strokeOpacity={0.3}
+                            strokeDasharray="4 2"
+                          />
+                        )}
                         <Line
                           type="monotone"
                           dataKey="temperature_2m"
