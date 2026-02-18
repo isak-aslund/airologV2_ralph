@@ -1,0 +1,29 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - FLIGHT_LOG_DEBUG=false
+      - FLIGHT_LOG_DATABASE_PATH=/app/data/flight_logs.db
+      - FLIGHT_LOG_UPLOAD_DIR=/app/data/logs
+      - FLIGHT_LOG_IMG_DIR=/app/img
+    volumes:
+      - ./data:/app/data
+      - ./img:/app/img
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - ./img:/usr/share/nginx/img:ro
+    depends_on:
+      - backend

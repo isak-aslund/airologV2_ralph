@@ -21,5 +21,8 @@ build/
 # Data directories
 data/
 
+# SSL certificates
+certs/
+
 # Node
 node_modules/
