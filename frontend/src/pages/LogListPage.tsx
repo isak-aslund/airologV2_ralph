@@ -36,6 +36,7 @@ function parseFiltersFromParams(searchParams: URLSearchParams): FilterState {
     flightModes,
     towMin: searchParams.get('tow_min') || '',
     towMax: searchParams.get('tow_max') || '',
+    hasAttachments: searchParams.get('has_attachments') || '',
   }
 }
 
@@ -108,6 +109,7 @@ export default function LogListPage() {
         date_to: filters.dateTo || undefined,
         tow_min: filters.towMin ? parseFloat(filters.towMin) : undefined,
         tow_max: filters.towMax ? parseFloat(filters.towMax) : undefined,
+        has_attachments: filters.hasAttachments === 'true' ? true : filters.hasAttachments === 'false' ? false : undefined,
       })
       setLogsData(data)
     } catch (err) {
@@ -136,6 +138,7 @@ export default function LogListPage() {
       flight_modes: newFilters.flightModes.length > 0 ? newFilters.flightModes.join(',') : undefined,
       tow_min: newFilters.towMin || undefined,
       tow_max: newFilters.towMax || undefined,
+      has_attachments: newFilters.hasAttachments || undefined,
     }, true)
   }
 
@@ -177,6 +180,9 @@ export default function LogListPage() {
       case 'towMax':
         newFilters.towMax = ''
         break
+      case 'hasAttachments':
+        newFilters.hasAttachments = ''
+        break
     }
 
     // Update URL params based on modified filters
@@ -189,6 +195,7 @@ export default function LogListPage() {
       flight_modes: newFilters.flightModes.length > 0 ? newFilters.flightModes.join(',') : undefined,
       tow_min: newFilters.towMin || undefined,
       tow_max: newFilters.towMax || undefined,
+      has_attachments: newFilters.hasAttachments || undefined,
     }, true)
   }
 

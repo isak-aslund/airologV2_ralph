@@ -311,17 +311,27 @@ export default function FlightLogTable({
               </td>
               {/* Title */}
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 max-w-xs">
-                {(() => {
-                  const { text, isTruncated, original } = truncateTitle(log.title)
-                  if (isTruncated) {
-                    return (
-                      <Tooltip text={original}>
-                        <span className="cursor-default">{text}</span>
-                      </Tooltip>
-                    )
-                  }
-                  return text
-                })()}
+                <div className="flex items-center gap-1.5">
+                  {(() => {
+                    const { text, isTruncated, original } = truncateTitle(log.title)
+                    if (isTruncated) {
+                      return (
+                        <Tooltip text={original}>
+                          <span className="cursor-default">{text}</span>
+                        </Tooltip>
+                      )
+                    }
+                    return <span>{text}</span>
+                  })()}
+                  {log.attachments && log.attachments.length > 0 && (
+                    <span className="inline-flex items-center gap-0.5 text-blue-500" title={`${log.attachments.length} attachment${log.attachments.length > 1 ? 's' : ''}`}>
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      <span className="text-xs font-medium">{log.attachments.length}</span>
+                    </span>
+                  )}
+                </div>
               </td>
               {/* Duration */}
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500 font-mono">

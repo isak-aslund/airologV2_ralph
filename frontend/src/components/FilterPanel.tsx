@@ -35,6 +35,7 @@ export interface FilterState {
   flightModes: string[]
   towMin: string  // Minimum TOW in kg (string for input handling)
   towMax: string  // Maximum TOW in kg (string for input handling)
+  hasAttachments: string  // '' = any, 'true' = with, 'false' = without
 }
 
 interface FilterPanelProps {
@@ -204,6 +205,13 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     })
   }
 
+  function handleHasAttachmentsChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    onFilterChange({
+      ...filters,
+      hasAttachments: e.target.value,
+    })
+  }
+
   function handleClearAll() {
     onFilterChange({
       dateFrom: '',
@@ -214,6 +222,7 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
       flightModes: [],
       towMin: '',
       towMax: '',
+      hasAttachments: '',
     })
   }
 
@@ -236,7 +245,8 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     filters.tags.length > 0 ||
     filters.flightModes.length > 0 ||
     filters.towMin !== '' ||
-    filters.towMax !== ''
+    filters.towMax !== '' ||
+    filters.hasAttachments !== ''
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg mb-4">
@@ -504,6 +514,23 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
                   className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
+            </div>
+
+            {/* Attachments filter */}
+            <div>
+              <label htmlFor="has-attachments" className="block text-sm font-medium text-gray-700 mb-1">
+                Attachments
+              </label>
+              <select
+                id="has-attachments"
+                value={filters.hasAttachments}
+                onChange={handleHasAttachmentsChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">All logs</option>
+                <option value="true">With attachments</option>
+                <option value="false">Without attachments</option>
+              </select>
             </div>
           </div>
 

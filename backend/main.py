@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.config import settings
 from backend.database import init_db
-from backend.routers import logs, stats, tags
+from backend.routers import attachments, logs, stats, tags
 
 
 @asynccontextmanager
@@ -46,6 +46,7 @@ app.mount("/img", StaticFiles(directory=str(settings.IMG_DIR)), name="img")
 app.include_router(logs.router)
 app.include_router(stats.router)
 app.include_router(tags.router)
+app.include_router(attachments.router)
 
 
 @app.get("/health")

@@ -11,6 +11,15 @@ export interface Tag {
   name: string;
 }
 
+// Attachment type for files associated with flight logs
+export interface Attachment {
+  id: string;
+  filename: string;
+  file_size: number;
+  content_type: string;
+  created_at: string;
+}
+
 // Flight log type with all fields including tags array
 export interface FlightLog {
   id: string;
@@ -31,6 +40,7 @@ export interface FlightLog {
   created_at: string; // ISO datetime string
   updated_at: string; // ISO datetime string
   tags: Tag[];
+  attachments: Attachment[];
 }
 
 // Generic paginated response type
@@ -90,6 +100,7 @@ export interface LogListParams {
   date_to?: string; // ISO date
   tow_min?: number; // Minimum takeoff weight in kg
   tow_max?: number; // Maximum takeoff weight in kg
+  has_attachments?: boolean; // Filter by whether log has attachments
 }
 
 // Extracted metadata from a .ulg file

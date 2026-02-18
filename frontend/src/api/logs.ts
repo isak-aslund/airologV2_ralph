@@ -1,5 +1,6 @@
 import client from './client'
 import type {
+  Attachment,
   DuplicateCheckRequest,
   DuplicateCheckResponse,
   ExtractedMetadata,
@@ -116,4 +117,31 @@ export async function uploadToFlightReview(id: string): Promise<{ flight_review_
 export async function checkDuplicates(request: DuplicateCheckRequest): Promise<DuplicateCheckResponse> {
   const response = await client.post<DuplicateCheckResponse>('/logs/check-duplicates', request)
   return response.data
+}
+
+/**
+ * Upload one or more attachments to a flight log.
+ */
+export async function uploadAttachments(logId: string, files: File[]): Promise<Attachment[]> {
+  const formData = new FormData()
+  files.forEach((file) => formData.append('files', file))
+  const response = await client.post<Attachment[]>(`/logs/${logId}/attachments`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return response.data
+}
+
+/**
+ * Delete an attachment from a flight log.
+ */
+export async function deleteAttachment(logId: string, attachmentId: string): Promise<void> {
+  await client.delete(`/logs/${logId}/attachments/${attachmentId}`)
+}
+
+/**
+ * Build the URL to serve/download an attachment.
+ */
+export function getAttachmentUrl(logId: string, attachmentId: string): string {
+  const base = client.defaults.baseURL || '/api'
+  return `${base}/logs/${logId}/attachments/${attachmentId}`
 }

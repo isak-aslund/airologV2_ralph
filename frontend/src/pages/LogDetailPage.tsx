@@ -5,6 +5,7 @@ import L from 'leaflet'
 import { getLog, downloadLog, uploadToFlightReview } from '../api/logs'
 import { formatDateISO } from '../utils/date'
 import WeatherSection from '../components/WeatherSection'
+import AttachmentsSection from '../components/AttachmentsSection'
 import ParameterModal from '../components/ParameterModal'
 import type { FlightLog, DroneModel } from '../types'
 
@@ -119,6 +120,11 @@ export default function LogDetailPage() {
       })
       .finally(() => setLoading(false))
   }, [id])
+
+  const refreshLog = () => {
+    if (!id) return
+    getLog(id).then(setLog).catch(() => {})
+  }
 
   const handleCopyLink = async () => {
     try {
@@ -406,6 +412,13 @@ export default function LogDetailPage() {
             </dd>
           </div>
         )}
+
+        {/* Attachments */}
+        <AttachmentsSection
+          logId={log.id}
+          attachments={log.attachments}
+          onChanged={refreshLog}
+        />
 
         {/* Actions bar */}
         <div className="px-6 py-4 border-b border-gray-200">

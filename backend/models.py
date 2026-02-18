@@ -90,5 +90,48 @@ class FlightLog(Base):
         back_populates="flight_logs",
     )
 
+    # Relationship to attachments
+    attachments: Mapped[list["Attachment"]] = relationship(
+        "Attachment",
+        back_populates="flight_log",
+        cascade="all, delete-orphan",
+    )
+
     def __repr__(self) -> str:
         return f"<FlightLog(id='{self.id}', title='{self.title}', pilot='{self.pilot}')>"
+
+
+class Attachment(Base):
+    """Attachment model for files associated with flight logs."""
+
+    __tablename__ = "attachments"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    flight_log_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("flight_logs.id"),
+        nullable=False,
+        index=True,
+    )
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    # Relationship back to flight log
+    flight_log: Mapped[FlightLog] = relationship(
+        "FlightLog",
+        back_populates="attachments",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Attachment(id='{self.id}', filename='{self.filename}')>"

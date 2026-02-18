@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from backend.config import settings
 from backend.database import get_db
-from backend.models import FlightLog, Tag
+from backend.models import Attachment, FlightLog, Tag
 from backend.schemas import (
     DuplicateCheckRequest,
     DuplicateCheckResponse,
@@ -59,6 +59,9 @@ async def list_logs(
     ),
     tow_max: Optional[float] = Query(
         default=None, description="Maximum takeoff weight in kg"
+    ),
+    has_attachments: Optional[bool] = Query(
+        default=None, description="Filter by whether log has attachments"
     ),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -139,6 +142,12 @@ async def list_logs(
         query = query.filter(FlightLog.tow >= tow_min)
     if tow_max is not None:
         query = query.filter(FlightLog.tow <= tow_max)
+
+    # Apply has_attachments filter
+    if has_attachments is True:
+        query = query.filter(FlightLog.attachments.any())
+    elif has_attachments is False:
+        query = query.filter(~FlightLog.attachments.any())
 
     # Order by flight_date descending
     query = query.order_by(FlightLog.flight_date.desc())
@@ -483,7 +492,16 @@ async def delete_log(
         except Exception:
             pass  # Continue even if file deletion fails
 
-    # Delete the database record
+    # Delete attachment files from disk before DB cascade removes the rows
+    for attachment in flight_log.attachments:
+        att_path = Path(attachment.file_path)
+        if att_path.exists():
+            try:
+                os.remove(att_path)
+            except Exception:
+                pass
+
+    # Delete the database record (cascades to attachments table)
     db.delete(flight_log)
     db.commit()
 

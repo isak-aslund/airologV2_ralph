@@ -95,6 +95,19 @@ export default function ActiveFilterChips({ filters, onRemoveFilter }: ActiveFil
     })
   }
 
+  // Attachments filter chip
+  if (filters.hasAttachments === 'true') {
+    chips.push({
+      label: 'Has attachments',
+      type: 'hasAttachments',
+    })
+  } else if (filters.hasAttachments === 'false') {
+    chips.push({
+      label: 'No attachments',
+      type: 'hasAttachments',
+    })
+  }
+
   // Don't render anything if no active filters
   if (chips.length === 0) {
     return null
