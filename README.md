@@ -2,40 +2,44 @@
 
 Web app for managing PX4 .ulg flight logs with metadata and visualization.
 
-## Quick Start (local)
+## Development
 
 ```bash
 # Backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
-uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 
 # Frontend (new terminal)
 cd frontend && npm install && npm run dev
 ```
 
-Open http://localhost:5173
+The Vite dev server proxies `/api` and `/img` to the backend automatically.
 
-## Development on a Server
+If you have SSL certs in `certs/` (cert.pem + key.pem), Vite serves over HTTPS. Otherwise it falls back to HTTP.
 
-```bash
-# Backend - use 0.0.0.0 to allow remote connections
-uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+Open https://localhost:5173 (or http:// if no certs).
 
-# Frontend - use --host to expose on network
-cd frontend && npm run dev -- --host
-```
+## Production (Docker)
 
-Open http://<SERVER_IP>:5173
-
-## Production
+Requires Docker. Self-signed SSL certs are generated automatically on first run.
 
 ```bash
+# Build frontend
 cd frontend && npm run build && cd ..
-source .venv/bin/activate
-uvicorn backend.main:app --host 0.0.0.0 --port 8000
+
+# Start
+docker compose up --build -d
+
+# View logs
+docker compose logs
+
+# Stop
+docker compose down
 ```
+
+Open https://\<SERVER_IP\> (port 80 redirects to 443).
 
 ## API Docs
 
-http://localhost:8000/docs
+Available at https://\<SERVER_IP\>/api/docs in production, or http://localhost:8000/docs in development.

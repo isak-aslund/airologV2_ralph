@@ -1,7 +1,0 @@
-[submodule "airolog"]
-	path = airolog
-	url = git@github.com:airolit/airolog.git
-	branch = feature/migrate-asus-backend-changes
-[submodule "flight_review"]
-	path = flight_review
-	url = https://github.com/PX4/flight_review.git
