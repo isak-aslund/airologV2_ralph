@@ -64,6 +64,8 @@ class FlightLogUpdate(BaseModel):
     drone_model: Optional[str] = Field(None, min_length=1, max_length=50)
     comment: Optional[str] = None
     tags: Optional[list[str]] = None
+    tow: Optional[float] = None
+    flight_date: Optional[datetime] = None
 
 
 class FlightLogResponse(BaseModel):

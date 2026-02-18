@@ -80,6 +80,8 @@ export interface FlightLogUpdate {
   drone_model?: string;
   comment?: string | null;
   tags?: string[];
+  tow?: number | null;
+  flight_date?: string | null;
 }
 
 // Tag creation request

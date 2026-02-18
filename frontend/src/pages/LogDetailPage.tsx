@@ -2,11 +2,14 @@ import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
-import { getLog, downloadLog, uploadToFlightReview } from '../api/logs'
+import { getLog, downloadLog, uploadToFlightReview, updateLog } from '../api/logs'
+import { getPilots, getDroneModels } from '../api/pilots'
 import { formatDateISO } from '../utils/date'
 import WeatherSection from '../components/WeatherSection'
 import AttachmentsSection from '../components/AttachmentsSection'
 import ParameterModal from '../components/ParameterModal'
+import InlineEdit from '../components/InlineEdit'
+import TagInput from '../components/TagInput'
 import type { FlightLog, DroneModel } from '../types'
 
 // leaflet marker icon fix (same as MapModal)
@@ -104,6 +107,9 @@ export default function LogDetailPage() {
   const [copied, setCopied] = useState(false)
   const [showParameters, setShowParameters] = useState(false)
   const [uploadingFlightReview, setUploadingFlightReview] = useState(false)
+  const [pilots, setPilots] = useState<string[]>([])
+  const [droneModels, setDroneModels] = useState<string[]>([])
+  const [editingTags, setEditingTags] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -121,9 +127,20 @@ export default function LogDetailPage() {
       .finally(() => setLoading(false))
   }, [id])
 
+  useEffect(() => {
+    getPilots().then(setPilots).catch(() => {})
+    getDroneModels().then(setDroneModels).catch(() => {})
+  }, [])
+
   const refreshLog = () => {
     if (!id) return
     getLog(id).then(setLog).catch(() => {})
+  }
+
+  const saveField = async (field: string, value: unknown) => {
+    if (!log) return
+    await updateLog(log.id, { [field]: value })
+    refreshLog()
   }
 
   const handleCopyLink = async () => {
@@ -263,7 +280,12 @@ export default function LogDetailPage() {
               </div>
             )}
             <div>
-              <h1 className="text-xl font-semibold text-gray-900">{log.title}</h1>
+              <h1 className="text-xl font-semibold text-gray-900">
+                <InlineEdit
+                  value={log.title}
+                  onSave={(v) => saveField('title', v)}
+                />
+              </h1>
               <p className="text-sm text-gray-500 mt-0.5">
                 {modelName || log.drone_model}
                 {log.serial_number && <span> &middot; S/N {log.serial_number}</span>}
@@ -277,11 +299,26 @@ export default function LogDetailPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-4">
             <div>
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Pilot</dt>
-              <dd className="mt-1 text-sm text-gray-900">{log.pilot}</dd>
+              <dd className="mt-1">
+                <InlineEdit
+                  value={log.pilot}
+                  onSave={(v) => saveField('pilot', v)}
+                  type="select"
+                  options={[...new Set([log.pilot, ...pilots])].map((p) => ({ value: p, label: p }))}
+                />
+              </dd>
             </div>
             <div>
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Flight date</dt>
-              <dd className="mt-1 text-sm text-gray-900">{formatDateISO(log.flight_date)}</dd>
+              <dd className="mt-1">
+                <InlineEdit
+                  value={log.flight_date ? log.flight_date.slice(0, 10) : ''}
+                  displayValue={formatDateISO(log.flight_date)}
+                  onSave={(v) => saveField('flight_date', v ? `${v}T00:00:00` : null)}
+                  type="date"
+                  placeholder="No date"
+                />
+              </dd>
             </div>
             <div>
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</dt>
@@ -289,13 +326,32 @@ export default function LogDetailPage() {
             </div>
             <div>
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Takeoff weight</dt>
-              <dd className="mt-1 text-sm text-gray-900">
-                {log.tow !== null ? `${log.tow.toFixed(2)} kg` : '--'}
+              <dd className="mt-1">
+                <InlineEdit
+                  value={log.tow !== null ? String(log.tow) : ''}
+                  displayValue={log.tow !== null ? log.tow.toFixed(2) : undefined}
+                  onSave={(v) => saveField('tow', v ? parseFloat(v) : null)}
+                  type="number"
+                  step="0.01"
+                  suffix="kg"
+                  placeholder="--"
+                />
               </dd>
             </div>
             <div>
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Drone model</dt>
-              <dd className="mt-1 text-sm text-gray-900">{modelName || log.drone_model}</dd>
+              <dd className="mt-1">
+                <InlineEdit
+                  value={log.drone_model}
+                  displayValue={modelName || log.drone_model}
+                  onSave={(v) => saveField('drone_model', v)}
+                  type="select"
+                  options={[...new Set([log.drone_model, ...droneModels])].map((m) => ({
+                    value: m,
+                    label: AUTOSTART_TO_MODEL[m] || m,
+                  }))}
+                />
+              </dd>
             </div>
             <div>
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Serial number</dt>
@@ -309,18 +365,50 @@ export default function LogDetailPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
             <div>
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Tags</dt>
-              <dd className="flex flex-wrap gap-1.5">
-                {log.tags.length === 0 ? (
-                  <span className="text-sm text-gray-400">No tags</span>
-                ) : (
-                  log.tags.map((tag, i) => (
-                    <span
-                      key={tag.id}
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium ${getTagColor(i)}`}
+              <dd>
+                {editingTags ? (
+                  <div>
+                    <TagInput
+                      selectedTags={log.tags.map((t) => t.name)}
+                      onTagsChange={async (newTags) => {
+                        await saveField('tags', newTags)
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setEditingTags(false)}
+                      className="mt-1.5 text-xs text-gray-500 hover:text-gray-700"
                     >
-                      {tag.name}
-                    </span>
-                  ))
+                      Done
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setEditingTags(true)}
+                    className="group flex flex-wrap items-center gap-1.5"
+                  >
+                    {log.tags.length === 0 ? (
+                      <span className="text-sm text-gray-400 italic">No tags</span>
+                    ) : (
+                      log.tags.map((tag, i) => (
+                        <span
+                          key={tag.id}
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium ${getTagColor(i)}`}
+                        >
+                          {tag.name}
+                        </span>
+                      ))
+                    )}
+                    <svg
+                      className="w-3.5 h-3.5 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                  </button>
                 )}
               </dd>
             </div>
@@ -345,12 +433,17 @@ export default function LogDetailPage() {
         </div>
 
         {/* Comment */}
-        {log.comment && (
-          <div className="px-6 py-5 border-b border-gray-200">
-            <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Comment</dt>
-            <dd className="text-sm text-gray-900 whitespace-pre-wrap">{log.comment}</dd>
-          </div>
-        )}
+        <div className="px-6 py-5 border-b border-gray-200">
+          <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Comment</dt>
+          <dd>
+            <InlineEdit
+              value={log.comment || ''}
+              onSave={(v) => saveField('comment', v || null)}
+              type="textarea"
+              placeholder="Add a comment..."
+            />
+          </dd>
+        </div>
 
         {/* Map */}
         {hasGps && (

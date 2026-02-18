@@ -459,6 +459,10 @@ async def update_log(
         flight_log.drone_model = update_data.drone_model
     if update_data.comment is not None:
         flight_log.comment = update_data.comment
+    if update_data.tow is not None:
+        flight_log.tow = update_data.tow
+    if update_data.flight_date is not None:
+        flight_log.flight_date = update_data.flight_date
 
     # Update tags if provided
     if update_data.tags is not None:
