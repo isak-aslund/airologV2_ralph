@@ -4,6 +4,7 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ .
+RUN rm -f public/img && mkdir -p public/img
 RUN npm run build
 
 # Stage 2: nginx
