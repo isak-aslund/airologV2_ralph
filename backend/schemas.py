@@ -155,3 +155,56 @@ class DuplicateCheckResponse(BaseModel):
     """Response for duplicate check."""
 
     results: list[DuplicateCheckResult]
+
+
+# Pilot Stats Schemas
+class PilotStatsEntry(BaseModel):
+    """Stats for a single pilot."""
+
+    pilot: str
+    total_flights: int
+    total_hours: float
+    hours_by_model: dict[str, float]
+    longest_flight_seconds: float
+    most_recent_flight: Optional[datetime] = None
+
+
+class PilotStatsResponse(BaseModel):
+    """Response for pilot stats endpoint."""
+
+    pilots: list[PilotStatsEntry]
+
+
+# Records Schemas
+class RecordEntry(BaseModel):
+    """A single flight record."""
+
+    pilot: str
+    duration_seconds: float
+    flight_date: Optional[datetime] = None
+    drone_model: str
+
+
+class DayRecord(BaseModel):
+    """Record for busiest day."""
+
+    date: str
+    flight_count: int
+    pilots: list[str]
+
+
+class WeekRecord(BaseModel):
+    """Record for busiest week."""
+
+    week_start: str
+    flight_count: int
+
+
+class RecordsResponse(BaseModel):
+    """Response for records endpoint."""
+
+    longest_flight: Optional[RecordEntry] = None
+    most_flights_in_a_day: Optional[DayRecord] = None
+    busiest_week: Optional[WeekRecord] = None
+    current_streak_days: int = 0
+    total_flight_days: int = 0

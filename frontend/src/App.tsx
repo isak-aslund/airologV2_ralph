@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
 import LogListPage from './pages/LogListPage'
 import LogDetailPage from './pages/LogDetailPage'
 import UploadPage from './pages/UploadPage'
+import StatsPage from './pages/StatsPage'
 import DroneConnection from './components/DroneConnection'
 import './App.css'
 
@@ -26,6 +27,12 @@ function App() {
                 Logs
               </Link>
               <Link
+                to="/stats"
+                className="text-gray-600 hover:text-gray-900 font-medium text-sm sm:text-base"
+              >
+                Stats
+              </Link>
+              <Link
                 to="/upload"
                 className="bg-blue-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-md hover:bg-blue-700 font-medium text-sm sm:text-base"
               >
@@ -39,6 +46,7 @@ function App() {
             <Route path="/" element={<LogListPage />} />
             <Route path="/logs/:id" element={<LogDetailPage />} />
             <Route path="/upload" element={<UploadPage />} />
+            <Route path="/stats" element={<StatsPage />} />
           </Routes>
         </main>
       </div>

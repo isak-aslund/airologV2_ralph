@@ -137,3 +137,44 @@ export interface DuplicateCheckResult {
 export interface DuplicateCheckResponse {
   results: DuplicateCheckResult[];
 }
+
+// Pilot stats types
+export interface PilotStatsEntry {
+  pilot: string;
+  total_flights: number;
+  total_hours: number;
+  hours_by_model: Record<string, number>;
+  longest_flight_seconds: number;
+  most_recent_flight: string | null;
+}
+
+export interface PilotStatsResponse {
+  pilots: PilotStatsEntry[];
+}
+
+// Records types
+export interface RecordEntry {
+  pilot: string;
+  duration_seconds: number;
+  flight_date: string | null;
+  drone_model: string;
+}
+
+export interface DayRecord {
+  date: string;
+  flight_count: number;
+  pilots: string[];
+}
+
+export interface WeekRecord {
+  week_start: string;
+  flight_count: number;
+}
+
+export interface RecordsResponse {
+  longest_flight: RecordEntry | null;
+  most_flights_in_a_day: DayRecord | null;
+  busiest_week: WeekRecord | null;
+  current_streak_days: number;
+  total_flight_days: number;
+}
