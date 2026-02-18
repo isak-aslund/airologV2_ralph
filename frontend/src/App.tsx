@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
 import LogListPage from './pages/LogListPage'
+import LogDetailPage from './pages/LogDetailPage'
 import UploadPage from './pages/UploadPage'
 import DroneConnection from './components/DroneConnection'
 import './App.css'
@@ -36,6 +37,7 @@ function App() {
         <main>
           <Routes>
             <Route path="/" element={<LogListPage />} />
+            <Route path="/logs/:id" element={<LogDetailPage />} />
             <Route path="/upload" element={<UploadPage />} />
           </Routes>
         </main>
