@@ -15,15 +15,14 @@ services:
 
   nginx:
     build:
-      context: ./nginx
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: nginx/Dockerfile
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./certs:/etc/nginx/certs
-      - ./frontend/dist:/usr/share/nginx/html:ro
       - ./img:/usr/share/nginx/img:ro
     depends_on:
       - backend

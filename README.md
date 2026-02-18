@@ -25,10 +25,7 @@ Open https://localhost:5173 (or http:// if no certs).
 Requires Docker. Self-signed SSL certs are generated automatically on first run.
 
 ```bash
-# Build frontend
-cd frontend && npm run build && cd ..
-
-# Start
+# Start (builds frontend and backend automatically)
 docker compose up --build -d
 
 # View logs
