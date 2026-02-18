@@ -22,7 +22,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./certs:/etc/nginx/certs:ro
+      - ./certs:/etc/nginx/certs
       - ./frontend/dist:/usr/share/nginx/html:ro
       - ./img:/usr/share/nginx/img:ro
     depends_on:
