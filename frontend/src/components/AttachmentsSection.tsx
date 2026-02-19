@@ -150,8 +150,6 @@ export default function AttachmentsSection({ logId, attachments, onChanged }: At
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-4">
             {attachments.map((att) => {
               const url = getAttachmentUrl(logId, att.id)
-              const media = isImage(att.content_type) || isVideo(att.content_type)
-
               return (
                 <div
                   key={att.id}
