@@ -72,7 +72,7 @@ export default function ParameterModal({ logId, logTitle, onClose }: ParameterMo
   }, [parameters, searchTerm, filterMode])
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
+    <div className="fixed inset-0 z-[1000] overflow-y-auto">
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"

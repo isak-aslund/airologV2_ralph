@@ -205,7 +205,7 @@ export default function WeatherModal({ lat, lon, date, logTitle, durationSeconds
   const openMeteoUrl = `https://open-meteo.com/en/docs/historical-forecast-api?latitude=${lat}&longitude=${lon}&start_date=${formattedDate}&end_date=${formattedDate}&minutely_15=temperature_2m,wind_speed_10m,wind_speed_80m,wind_gusts_10m&wind_speed_unit=ms`
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
+    <div className="fixed inset-0 z-[1000] overflow-y-auto">
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
