@@ -532,8 +532,8 @@ async def download_log(
             detail="File not found on disk",
         )
 
-    # Use a descriptive filename for download
-    filename = f"{flight_log.title.replace(' ', '_')}_{log_id}.ulg"
+    # Use original uploaded filename for download, fall back to title
+    filename = f"{flight_log.log_identifier}.ulg" if flight_log.log_identifier else f"{flight_log.title.replace(' ', '_')}.ulg"
 
     return FileResponse(
         path=file_path,

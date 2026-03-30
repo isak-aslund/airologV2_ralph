@@ -216,7 +216,7 @@ export default function LogListPage() {
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${log.title.replace(/[^a-zA-Z0-9]/g, '_')}.ulg`
+      a.download = `${log.log_identifier || log.title.replace(/[^a-zA-Z0-9]/g, '_')}.ulg`
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)
