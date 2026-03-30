@@ -37,6 +37,7 @@ export interface FlightLog {
   flight_review_id: string | null; // ID on Flight Review server (null if not uploaded)
   flight_modes: string[]; // Auto-extracted flight modes from ULog
   tow: number | null; // Takeoff weight in kg
+  session: string | null; // Flight session grouping identifier
   created_at: string; // ISO datetime string
   updated_at: string; // ISO datetime string
   tags: Tag[];
@@ -72,6 +73,7 @@ export interface FlightLogCreate {
   flight_date?: string | null;
   tags?: string[];
   tow?: number | null;
+  session?: string | null;
 }
 
 export interface FlightLogUpdate {
@@ -82,6 +84,7 @@ export interface FlightLogUpdate {
   tags?: string[];
   tow?: number | null;
   flight_date?: string | null;
+  session?: string | null;
 }
 
 // Tag creation request

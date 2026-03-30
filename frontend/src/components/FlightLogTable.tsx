@@ -186,7 +186,7 @@ function TableSkeleton() {
         {/* Header skeleton */}
         <div className="bg-gray-50 border-b border-gray-200 px-4 py-3">
           <div className="flex gap-4">
-            {[40, 60, 80, 60, 100, 80, 100, 80, 120, 80, 100].map((width, i) => (
+            {[40, 60, 80, 60, 100, 80, 100, 80, 60, 120, 80, 100].map((width, i) => (
               <div key={i} className="h-4 bg-gray-200 rounded" style={{ width: `${width}px` }} />
             ))}
           </div>
@@ -203,6 +203,7 @@ function TableSkeleton() {
               <div className="h-4 w-20 bg-gray-200 rounded" />
               <div className="h-4 w-24 bg-gray-200 rounded" />
               <div className="h-4 w-20 bg-gray-200 rounded" />
+              <div className="h-4 w-16 bg-gray-200 rounded" />
               <div className="h-4 w-40 bg-gray-200 rounded" />
               <div className="h-4 w-20 bg-gray-200 rounded" />
               <div className="h-4 w-28 bg-gray-200 rounded" />
@@ -267,6 +268,9 @@ export default function FlightLogTable({
             </th>
             <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Tags
+            </th>
+            <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Session
             </th>
             <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Modes
@@ -357,6 +361,16 @@ export default function FlightLogTable({
                     ))
                   )}
                 </div>
+              </td>
+              {/* Session */}
+              <td className="px-3 py-2 whitespace-nowrap text-sm">
+                {log.session ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                    {log.session}
+                  </span>
+                ) : (
+                  <span className="text-gray-400">--</span>
+                )}
               </td>
               {/* Modes */}
               <td className="px-3 py-2 whitespace-nowrap">

@@ -54,6 +54,7 @@ class FlightLogCreate(BaseModel):
     flight_date: Optional[datetime] = None
     tags: Optional[list[str]] = Field(default_factory=list)
     tow: Optional[float] = None
+    session: Optional[str] = None
 
 
 class FlightLogUpdate(BaseModel):
@@ -66,6 +67,7 @@ class FlightLogUpdate(BaseModel):
     tags: Optional[list[str]] = None
     tow: Optional[float] = None
     flight_date: Optional[datetime] = None
+    session: Optional[str] = None
 
 
 class FlightLogResponse(BaseModel):
@@ -88,6 +90,7 @@ class FlightLogResponse(BaseModel):
     flight_review_id: Optional[str]
     flight_modes: list[str]
     tow: Optional[float]
+    session: Optional[str]
     created_at: datetime
     updated_at: datetime
     tags: list[TagResponse]
