@@ -94,6 +94,7 @@ async def list_logs(
                 FlightLog.pilot.ilike(search_term),
                 FlightLog.comment.ilike(search_term),
                 FlightLog.serial_number.ilike(search_term),
+                FlightLog.session.ilike(search_term),
             )
         )
 
@@ -294,6 +295,7 @@ async def create_log(
     comment: str | None = Form(None),
     tags: str | None = Form(None),
     tow: float | None = Form(None),
+    session: str | None = Form(None),
     db: Session = Depends(get_db),
 ) -> FlightLog:
     """
@@ -407,6 +409,7 @@ async def create_log(
         takeoff_lon=metadata.get("takeoff_lon"),
         flight_modes=metadata.get("flight_modes", []),
         tow=tow,
+        session=session,
         tags=tag_objects,
     )
 
@@ -463,6 +466,8 @@ async def update_log(
         flight_log.tow = update_data.tow
     if update_data.flight_date is not None:
         flight_log.flight_date = update_data.flight_date
+    if update_data.session is not None:
+        flight_log.session = update_data.session
 
     # Update tags if provided
     if update_data.tags is not None:

@@ -82,3 +82,7 @@ def _run_migrations() -> None:
         if "tow" not in columns:
             conn.execute(text("ALTER TABLE flight_logs ADD COLUMN tow REAL"))
             conn.commit()
+
+        if "session" not in columns:
+            conn.execute(text("ALTER TABLE flight_logs ADD COLUMN session VARCHAR(255)"))
+            conn.commit()

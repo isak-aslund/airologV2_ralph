@@ -227,6 +227,11 @@ export default function UploadPage() {
   const [formErrors, setFormErrors] = useState<FormErrors>({})
   const [pilots, setPilots] = useState<string[]>([])
   const [showPilotSuggestions, setShowPilotSuggestions] = useState(false)
+
+  // Session state
+  const [sessionEnabled, setSessionEnabled] = useState(false)
+  const [sessionName, setSessionName] = useState('')
+  const effectiveSessionRef = useRef<string | null>(null)
   const pilotInputRef = useRef<HTMLInputElement>(null)
   const pilotContainerRef = useRef<HTMLDivElement>(null)
 
@@ -640,6 +645,11 @@ export default function UploadPage() {
     setBatchUploadIndex(0)
     setUploadError(null)
 
+    // Compute session value once for all files in batch
+    effectiveSessionRef.current = sessionEnabled
+      ? (sessionName.trim() || crypto.randomUUID().slice(0, 8))
+      : null
+
     // Initialize all files as pending
     const initialStatuses = new Map<string, FileUploadStatus>()
     selectedFiles.forEach(file => {
@@ -696,6 +706,11 @@ export default function UploadPage() {
         // TOW
         if (tow > 0) {
           uploadData.append('tow', tow.toString())
+        }
+
+        // Session
+        if (effectiveSessionRef.current) {
+          uploadData.append('session', effectiveSessionRef.current)
         }
 
         await createLog(uploadData)
@@ -786,6 +801,11 @@ export default function UploadPage() {
       // TOW
       if (tow > 0) {
         uploadData.append('tow', tow.toString())
+      }
+
+      // Session (reuse value from batch upload)
+      if (effectiveSessionRef.current) {
+        uploadData.append('session', effectiveSessionRef.current)
       }
 
       await createLog(uploadData)
@@ -983,6 +1003,9 @@ export default function UploadPage() {
         tags: [],
       })
       setFormErrors({})
+      setSessionEnabled(false)
+      setSessionName('')
+      effectiveSessionRef.current = null
     }
   }
 
@@ -1015,6 +1038,9 @@ export default function UploadPage() {
     })
     setShowCustomItem(false)
     setFormErrors({})
+    setSessionEnabled(false)
+    setSessionName('')
+    effectiveSessionRef.current = null
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -1773,6 +1799,28 @@ export default function UploadPage() {
               onTagsChange={(tags) => handleFormChange('tags', tags)}
               placeholder="Search or create tags..."
             />
+          </div>
+
+          {/* Session */}
+          <div className="mt-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={sessionEnabled}
+                onChange={(e) => setSessionEnabled(e.target.checked)}
+                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium text-gray-700">Group as session</span>
+            </label>
+            {sessionEnabled && (
+              <input
+                type="text"
+                value={sessionName}
+                onChange={(e) => setSessionName(e.target.value)}
+                className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Session name (leave blank for auto-generated)"
+              />
+            )}
           </div>
         </div>
       )}

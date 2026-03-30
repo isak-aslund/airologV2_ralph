@@ -357,6 +357,16 @@ export default function LogDetailPage() {
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Serial number</dt>
               <dd className="mt-1 text-sm text-gray-900">{log.serial_number || '--'}</dd>
             </div>
+            <div>
+              <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Session</dt>
+              <dd className="mt-1">
+                <InlineEdit
+                  value={log.session || ''}
+                  onSave={(v) => saveField('session', v || null)}
+                  placeholder="--"
+                />
+              </dd>
+            </div>
           </div>
         </div>
 
