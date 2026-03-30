@@ -10,6 +10,18 @@ import type {
   PaginatedResponse,
 } from '../types'
 
+export async function bulkDownloadLogs(ids: string[]): Promise<Blob> {
+  const response = await client.post('/logs/bulk-download', { ids }, {
+    responseType: 'blob',
+  })
+  return response.data
+}
+
+export async function getFilteredLogIds(params?: LogListParams): Promise<string[]> {
+  const response = await client.get<string[]>('/logs/ids', { params })
+  return response.data
+}
+
 /**
  * Get paginated list of flight logs with optional filters.
  */
