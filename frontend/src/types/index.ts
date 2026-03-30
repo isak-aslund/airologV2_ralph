@@ -106,6 +106,10 @@ export interface LogListParams {
   tow_min?: number; // Minimum takeoff weight in kg
   tow_max?: number; // Maximum takeoff weight in kg
   has_attachments?: boolean; // Filter by whether log has attachments
+  session?: string; // Exact session match
+  tags_logic?: 'and' | 'or';
+  flight_modes_logic?: 'and' | 'or';
+  drone_model_logic?: 'and' | 'or';
 }
 
 // Extracted metadata from a .ulg file

@@ -77,6 +77,21 @@ async def get_pilots(
     return [p[0] for p in pilots if p[0]]
 
 
+@router.get("/sessions")
+async def get_sessions(
+    db: Session = Depends(get_db),
+) -> list[str]:
+    """Get list of unique session names for filtering."""
+    sessions = (
+        db.query(FlightLog.session)
+        .filter(FlightLog.session.isnot(None), FlightLog.session != "")
+        .distinct()
+        .order_by(FlightLog.session)
+        .all()
+    )
+    return [s[0] for s in sessions]
+
+
 @router.get("/drone-models")
 async def get_drone_models(
     db: Session = Depends(get_db),
