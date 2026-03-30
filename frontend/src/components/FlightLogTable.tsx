@@ -291,15 +291,13 @@ export default function FlightLogTable({
             <tr key={log.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
               {/* Thumbnail - only show for known drone models */}
               <td className="px-3 py-2 whitespace-nowrap">
-                {KNOWN_DRONE_MODELS.includes(log.drone_model as DroneModel) ? (
-                  <img
-                    src={`/img/${AUTOSTART_TO_MODEL[log.drone_model]}.png`}
-                    alt={`${AUTOSTART_TO_MODEL[log.drone_model]} drone`}
-                    className="w-10 h-10 object-contain"
-                  />
-                ) : (
-                  <div className="w-10 h-10" />
-                )}
+                <img
+                  src={KNOWN_DRONE_MODELS.includes(log.drone_model as DroneModel)
+                    ? `/img/${AUTOSTART_TO_MODEL[log.drone_model]}.png`
+                    : '/img/drone_placeholder.png'}
+                  alt={`${AUTOSTART_TO_MODEL[log.drone_model] || log.drone_model} drone`}
+                  className="h-8 w-auto object-contain"
+                />
               </td>
               {/* Model */}
               <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
