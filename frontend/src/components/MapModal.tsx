@@ -60,7 +60,7 @@ export default function MapModal({ lat, lon, logTitle, flightDate, onClose }: Ma
     <div className="fixed inset-0 z-[1000] overflow-y-auto">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+        className="fixed inset-0 bg-black/50 transition-opacity"
         onClick={onClose}
       />
 
