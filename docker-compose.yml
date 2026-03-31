@@ -10,8 +10,8 @@ services:
       - FLIGHT_LOG_UPLOAD_DIR=/app/data/logs
       - FLIGHT_LOG_IMG_DIR=/app/img
     volumes:
-      - ./data:/app/data
-      - ./img:/app/img
+      - /mnt/data/airolog-data:/app/data
+      - /mnt/data/airolog-img:/app/img
 
   nginx:
     build:
@@ -22,7 +22,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./certs:/etc/nginx/certs
-      - ./img:/usr/share/nginx/img:ro
+      - /mnt/data/airolog-certs:/etc/nginx/certs
+      - /mnt/data/airolog-img:/usr/share/nginx/img:ro
     depends_on:
       - backend
