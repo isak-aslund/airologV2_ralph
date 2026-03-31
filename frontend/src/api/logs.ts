@@ -10,6 +10,11 @@ import type {
   PaginatedResponse,
 } from '../types'
 
+export async function bulkDeleteLogs(ids: string[]): Promise<{ deleted: number }> {
+  const response = await client.post<{ deleted: number }>('/logs/bulk-delete', { ids })
+  return response.data
+}
+
 export async function bulkDownloadLogs(ids: string[]): Promise<Blob> {
   const response = await client.post('/logs/bulk-download', { ids }, {
     responseType: 'blob',

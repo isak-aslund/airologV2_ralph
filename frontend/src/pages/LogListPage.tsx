@@ -9,6 +9,8 @@ import Pagination from '../components/Pagination'
 import DeleteConfirmModal from '../components/DeleteConfirmModal'
 import ParameterModal from '../components/ParameterModal'
 import EditLogModal from '../components/EditLogModal'
+import BulkDeleteConfirmModal from '../components/BulkDeleteConfirmModal'
+import CompareParametersModal from '../components/CompareParametersModal'
 import { getLogs, downloadLog, uploadToFlightReview, bulkDownloadLogs, getFilteredLogIds } from '../api/logs'
 import type { FlightLog, PaginatedResponse } from '../types'
 
@@ -60,9 +62,13 @@ function parsePerPageFromParams(searchParams: URLSearchParams): 25 | 50 | 100 {
 function SelectActionsDropdown({
   onSelectFiltered,
   onClearSelection,
+  onDeleteSelected,
+  onCompareParameters,
 }: {
   onSelectFiltered?: () => void
   onClearSelection?: () => void
+  onDeleteSelected?: () => void
+  onCompareParameters?: () => void
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -75,7 +81,7 @@ function SelectActionsDropdown({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const hasOptions = !!onSelectFiltered || !!onClearSelection
+  const hasOptions = !!onSelectFiltered || !!onClearSelection || !!onDeleteSelected || !!onCompareParameters
 
   return (
     <div ref={ref} className="relative">
@@ -95,7 +101,16 @@ function SelectActionsDropdown({
         </svg>
       </button>
       {open && (
-        <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-10">
+        <div className="absolute right-0 mt-1 w-52 bg-white border border-gray-200 rounded-md shadow-lg z-10 py-1">
+          {onCompareParameters && (
+            <button
+              type="button"
+              onClick={() => { onCompareParameters(); setOpen(false) }}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+            >
+              Compare parameters
+            </button>
+          )}
           {onSelectFiltered && (
             <button
               type="button"
@@ -113,6 +128,18 @@ function SelectActionsDropdown({
             >
               Clear selection
             </button>
+          )}
+          {onDeleteSelected && (
+            <>
+              <div className="border-t border-gray-200 my-1" />
+              <button
+                type="button"
+                onClick={() => { onDeleteSelected(); setOpen(false) }}
+                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+              >
+                Delete selected
+              </button>
+            </>
           )}
         </div>
       )}
@@ -132,6 +159,8 @@ export default function LogListPage() {
   const [uploadingFlightReviewId, setUploadingFlightReviewId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkDownloading, setBulkDownloading] = useState(false)
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
+  const [showCompareModal, setShowCompareModal] = useState(false)
 
   // Parse state from URL params
   const search = searchParams.get('search') || ''
@@ -463,7 +492,7 @@ export default function LogListPage() {
   }
 
   return (
-    <div className="container mx-auto p-4">
+    <div className="mx-auto p-4 max-w-[90%]">
       <StatsHeader />
       <h1 className="text-2xl font-bold mb-4">Flight Logs</h1>
 
@@ -492,6 +521,8 @@ export default function LogListPage() {
           <SelectActionsDropdown
             onSelectFiltered={hasActiveFilters ? handleSelectFiltered : undefined}
             onClearSelection={selectedIds.size > 0 ? () => setSelectedIds(new Set()) : undefined}
+            onDeleteSelected={selectedIds.size > 0 ? () => setShowBulkDeleteModal(true) : undefined}
+            onCompareParameters={selectedIds.size >= 2 ? () => setShowCompareModal(true) : undefined}
           />
         </div>
       </div>
@@ -563,6 +594,27 @@ export default function LogListPage() {
           log={editModalLog}
           onClose={handleEditModalClose}
           onSaved={handleEditSaved}
+        />
+      )}
+
+      {/* Bulk delete confirmation modal */}
+      {showBulkDeleteModal && (
+        <BulkDeleteConfirmModal
+          ids={[...selectedIds]}
+          onClose={() => setShowBulkDeleteModal(false)}
+          onDeleted={() => {
+            setShowBulkDeleteModal(false)
+            setSelectedIds(new Set())
+            fetchLogs()
+          }}
+        />
+      )}
+
+      {/* Compare parameters modal */}
+      {showCompareModal && logsData && (
+        <CompareParametersModal
+          logs={logsData.items.filter((l) => selectedIds.has(l.id))}
+          onClose={() => setShowCompareModal(false)}
         />
       )}
     </div>

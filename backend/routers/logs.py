@@ -269,6 +269,40 @@ async def bulk_download(
     )
 
 
+@router.post("/bulk-delete")
+async def bulk_delete(
+    request: BulkDownloadRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    """Delete multiple flight logs and their associated files."""
+    if not request.ids:
+        raise HTTPException(status_code=400, detail="No log IDs provided")
+
+    logs = db.query(FlightLog).filter(FlightLog.id.in_(request.ids)).all()
+    deleted = 0
+    for log in logs:
+        # Delete .ulg file
+        file_path = Path(log.file_path)
+        if file_path.exists():
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+        # Delete attachment files
+        for attachment in log.attachments:
+            att_path = Path(attachment.file_path)
+            if att_path.exists():
+                try:
+                    os.remove(att_path)
+                except Exception:
+                    pass
+        db.delete(log)
+        deleted += 1
+
+    db.commit()
+    return {"deleted": deleted}
+
+
 def get_or_create_tags(db: Session, tag_names: list[str]) -> list[Tag]:
     """Get existing tags or create new ones."""
     tags: list[Tag] = []

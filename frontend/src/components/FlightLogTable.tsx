@@ -313,7 +313,7 @@ export default function FlightLogTable({
                     ? `/img/${AUTOSTART_TO_MODEL[log.drone_model]}.png`
                     : '/img/drone_placeholder.png'}
                   alt={`${AUTOSTART_TO_MODEL[log.drone_model] || log.drone_model} drone`}
-                  className="h-8 w-auto object-contain"
+                  className="h-8 min-w-8 object-contain"
                 />
               </td>
               {/* Model */}
