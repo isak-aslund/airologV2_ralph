@@ -183,12 +183,7 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     })
   }
 
-  function handlePilotChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    onFilterChange({
-      ...filters,
-      pilot: e.target.value,
-    })
-  }
+
 
   function handleTagToggle(tagName: string) {
     const isSelected = filters.tags.includes(tagName)
@@ -247,12 +242,7 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     })
   }
 
-  function handleSessionChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    onFilterChange({
-      ...filters,
-      session: e.target.value,
-    })
-  }
+
 
   function handleClearAll() {
     onFilterChange({
