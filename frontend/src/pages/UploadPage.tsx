@@ -161,12 +161,14 @@ interface FileMetadataState {
   isLoading: boolean
   error: string | null
   metadata: ExtractedMetadata | null
+  progress: number // 0-100 upload progress
 }
 
 // Per-file upload status (for batch upload)
 interface FileUploadStatus {
   status: 'pending' | 'uploading' | 'success' | 'error'
   error?: string
+  progress: number // 0-100 upload progress
 }
 
 // Navigation state interface for receiving drone log from DroneLogsPanel
@@ -397,7 +399,7 @@ export default function UploadPage() {
     setFileMetadataStates(prev => {
       const newMap = new Map(prev)
       for (const file of filesToExtract) {
-        newMap.set(file.name, { isLoading: true, error: null, metadata: null })
+        newMap.set(file.name, { isLoading: true, error: null, metadata: null, progress: 0 })
       }
       return newMap
     })
@@ -414,7 +416,15 @@ export default function UploadPage() {
         filesToExtract.map(async (file) => {
           try {
             console.log('[UploadPage] Extracting metadata for:', file.name, 'size:', file.size)
-            const metadata = await extractMetadata(file)
+            const metadata = await extractMetadata(file, (event) => {
+              const percent = event.total ? Math.round((event.loaded / event.total) * 100) : 0
+              setFileMetadataStates(prev => {
+                const newMap = new Map(prev)
+                const current = newMap.get(file.name)
+                if (current) newMap.set(file.name, { ...current, progress: percent })
+                return newMap
+              })
+            })
             console.log('[UploadPage] Extraction successful for:', file.name, metadata)
             return { filename: file.name, metadata, error: null }
           } catch (err) {
@@ -437,7 +447,8 @@ export default function UploadPage() {
           newMap.set(result.filename, {
             isLoading: false,
             error: result.error,
-            metadata: result.metadata
+            metadata: result.metadata,
+            progress: result.error ? 0 : 100,
           })
         }
         return newMap
@@ -653,7 +664,7 @@ export default function UploadPage() {
     // Initialize all files as pending
     const initialStatuses = new Map<string, FileUploadStatus>()
     selectedFiles.forEach(file => {
-      initialStatuses.set(file.name, { status: 'pending' })
+      initialStatuses.set(file.name, { status: 'pending', progress: 0 })
     })
     setFileUploadStatuses(initialStatuses)
 
@@ -666,7 +677,7 @@ export default function UploadPage() {
       setBatchUploadIndex(i)
       setFileUploadStatuses(prev => {
         const newMap = new Map(prev)
-        newMap.set(file.name, { status: 'uploading' })
+        newMap.set(file.name, { status: 'uploading', progress: 0 })
         return newMap
       })
 
@@ -713,12 +724,19 @@ export default function UploadPage() {
           uploadData.append('session', effectiveSessionRef.current)
         }
 
-        await createLog(uploadData)
+        await createLog(uploadData, (event) => {
+          const percent = event.total ? Math.round((event.loaded / event.total) * 100) : 0
+          setFileUploadStatuses(prev => {
+            const newMap = new Map(prev)
+            newMap.set(file.name, { status: 'uploading', progress: percent })
+            return newMap
+          })
+        })
 
         // Mark as success
         setFileUploadStatuses(prev => {
           const newMap = new Map(prev)
-          newMap.set(file.name, { status: 'success' })
+          newMap.set(file.name, { status: 'success', progress: 100 })
           return newMap
         })
       } catch (err) {
@@ -727,7 +745,8 @@ export default function UploadPage() {
           const newMap = new Map(prev)
           newMap.set(file.name, {
             status: 'error',
-            error: err instanceof Error ? err.message : 'Upload failed'
+            error: err instanceof Error ? err.message : 'Upload failed',
+            progress: 0,
           })
           return newMap
         })
@@ -762,7 +781,7 @@ export default function UploadPage() {
     // Mark as uploading
     setFileUploadStatuses(prev => {
       const newMap = new Map(prev)
-      newMap.set(file.name, { status: 'uploading' })
+      newMap.set(file.name, { status: 'uploading', progress: 0 })
       return newMap
     })
 
@@ -808,12 +827,19 @@ export default function UploadPage() {
         uploadData.append('session', effectiveSessionRef.current)
       }
 
-      await createLog(uploadData)
+      await createLog(uploadData, (event) => {
+        const percent = event.total ? Math.round((event.loaded / event.total) * 100) : 0
+        setFileUploadStatuses(prev => {
+          const newMap = new Map(prev)
+          newMap.set(file.name, { status: 'uploading', progress: percent })
+          return newMap
+        })
+      })
 
       // Mark as success
       setFileUploadStatuses(prev => {
         const newMap = new Map(prev)
-        newMap.set(file.name, { status: 'success' })
+        newMap.set(file.name, { status: 'success', progress: 100 })
         return newMap
       })
     } catch (err) {
@@ -822,7 +848,8 @@ export default function UploadPage() {
         const newMap = new Map(prev)
         newMap.set(file.name, {
           status: 'error',
-          error: err instanceof Error ? err.message : 'Upload failed'
+          error: err instanceof Error ? err.message : 'Upload failed',
+          progress: 0,
         })
         return newMap
       })
@@ -1261,7 +1288,7 @@ export default function UploadPage() {
                           <div className="flex items-center gap-2">
                             <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
                             {uploadStatus?.status === 'uploading' && (
-                              <span className="text-xs text-blue-600 font-medium">Uploading...</span>
+                              <span className="text-xs text-blue-600 font-medium tabular-nums">Uploading... {uploadStatus.progress}%</span>
                             )}
                             {uploadStatus?.status === 'success' && (
                               <span className="text-xs text-green-600 font-medium">Uploaded</span>
@@ -1284,6 +1311,19 @@ export default function UploadPage() {
                             )}
                           </div>
                           <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                          {uploadStatus?.status === 'uploading' && (
+                            <div className="flex items-center gap-2 mt-1">
+                              <div className="flex-1 h-2 bg-blue-100 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-blue-500 rounded-full transition-all duration-150"
+                                  style={{ width: `${uploadStatus.progress}%` }}
+                                />
+                              </div>
+                              <span className="text-xs text-blue-600 font-medium tabular-nums w-20 text-right">
+                                {formatFileSize(Math.round(file.size * uploadStatus.progress / 100))} / {formatFileSize(file.size)}
+                              </span>
+                            </div>
+                          )}
                           {uploadStatus?.status === 'error' && (
                             <div className="flex items-center gap-2 mt-0.5">
                               {uploadStatus.error && (
@@ -1301,29 +1341,39 @@ export default function UploadPage() {
                           {/* Metadata preview row */}
                           <div className="mt-1">
                             {isFileLoading ? (
-                              // Loading state - prominent indicator
-                              <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-md animate-pulse">
-                                <svg
-                                  className="animate-spin h-4 w-4 text-blue-600"
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <circle
-                                    className="opacity-25"
-                                    cx="12"
-                                    cy="12"
-                                    r="10"
-                                    stroke="currentColor"
-                                    strokeWidth="4"
+                              // Loading state - progress bar with percentage
+                              <div>
+                                <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-md">
+                                  <svg
+                                    className="animate-spin h-4 w-4 text-blue-600"
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <circle
+                                      className="opacity-25"
+                                      cx="12"
+                                      cy="12"
+                                      r="10"
+                                      stroke="currentColor"
+                                      strokeWidth="4"
+                                    />
+                                    <path
+                                      className="opacity-75"
+                                      fill="currentColor"
+                                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                    />
+                                  </svg>
+                                  <span className="text-xs font-medium text-blue-700 tabular-nums">
+                                    Uploading for metadata extraction... {metadataState?.progress ?? 0}%
+                                  </span>
+                                </div>
+                                <div className="mt-1 h-1.5 bg-blue-100 rounded-full overflow-hidden max-w-xs">
+                                  <div
+                                    className="h-full bg-blue-400 rounded-full transition-all duration-150"
+                                    style={{ width: `${metadataState?.progress ?? 0}%` }}
                                   />
-                                  <path
-                                    className="opacity-75"
-                                    fill="currentColor"
-                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                                  />
-                                </svg>
-                                <span className="text-xs font-medium text-blue-700">Extracting metadata...</span>
+                                </div>
                               </div>
                             ) : fileError ? (
                               // Error state
