@@ -1,3 +1,4 @@
+import type { AxiosProgressEvent } from 'axios'
 import client from './client'
 import type {
   Attachment,
@@ -47,11 +48,15 @@ export async function getLog(id: string): Promise<FlightLog> {
  * Create a new flight log with file upload.
  * @param formData - FormData containing file and metadata fields
  */
-export async function createLog(formData: FormData): Promise<FlightLog> {
+export async function createLog(
+  formData: FormData,
+  onUploadProgress?: (event: AxiosProgressEvent) => void,
+): Promise<FlightLog> {
   const response = await client.post<FlightLog>('/logs', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
     },
+    onUploadProgress,
   })
   return response.data
 }
@@ -107,13 +112,17 @@ export async function getParameters(id: string): Promise<Record<string, Paramete
  * Used during upload to pre-populate form fields.
  * @param file - The .ulg file to extract metadata from
  */
-export async function extractMetadata(file: File): Promise<ExtractedMetadata> {
+export async function extractMetadata(
+  file: File,
+  onUploadProgress?: (event: AxiosProgressEvent) => void,
+): Promise<ExtractedMetadata> {
   const formData = new FormData()
   formData.append('file', file)
   const response = await client.post<ExtractedMetadata>('/extract-metadata', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
     },
+    onUploadProgress,
   })
   return response.data
 }
