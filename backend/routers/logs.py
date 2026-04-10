@@ -528,7 +528,7 @@ async def create_log(
     flight_log = FlightLog(
         id=log_id,
         title=title,
-        pilot=pilot,
+        pilot=pilot.strip().title(),
         drone_model=drone_model,
         serial_number=final_serial_number,
         log_identifier=log_identifier,
@@ -588,7 +588,7 @@ async def update_log(
     if update_data.title is not None:
         flight_log.title = update_data.title
     if update_data.pilot is not None:
-        flight_log.pilot = update_data.pilot
+        flight_log.pilot = update_data.pilot.strip().title()
     if update_data.drone_model is not None:
         flight_log.drone_model = update_data.drone_model
     if update_data.comment is not None:

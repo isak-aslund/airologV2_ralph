@@ -4,8 +4,9 @@ import os
 import tempfile
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy import func
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -289,6 +290,76 @@ async def get_records(
         "current_streak_days": streak,
         "total_flight_days": total_flight_days,
     }
+
+
+class PilotMergeRequest(BaseModel):
+    from_name: str
+    to_name: str
+
+
+class PilotMergeResponse(BaseModel):
+    updated: int
+    from_name: str
+    to_name: str
+
+
+@router.post("/pilots/merge", response_model=PilotMergeResponse)
+async def merge_pilot(
+    request: PilotMergeRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Rename all logs from one pilot name to another."""
+    from_name = request.from_name.strip()
+    to_name = request.to_name.strip().title()
+
+    if not from_name or not to_name:
+        raise HTTPException(status_code=400, detail="Both from_name and to_name are required")
+
+    count = (
+        db.query(FlightLog)
+        .filter(FlightLog.pilot == from_name)
+        .count()
+    )
+
+    if count == 0:
+        raise HTTPException(status_code=404, detail=f"No logs found for pilot '{from_name}'")
+
+    db.execute(
+        update(FlightLog)
+        .where(FlightLog.pilot == from_name)
+        .values(pilot=to_name)
+    )
+    db.commit()
+
+    return {"updated": count, "from_name": from_name, "to_name": to_name}
+
+
+@router.post("/pilots/normalize-casing")
+async def normalize_pilot_casing(
+    db: Session = Depends(get_db),
+) -> dict:
+    """Title-case all pilot names (e.g. 'patrik' -> 'Patrik')."""
+    pilots = (
+        db.query(FlightLog.pilot)
+        .distinct()
+        .all()
+    )
+
+    changes = []
+    for (name,) in pilots:
+        if not name:
+            continue
+        normalized = name.strip().title()
+        if normalized != name:
+            count = (
+                db.query(FlightLog)
+                .filter(FlightLog.pilot == name)
+                .update({FlightLog.pilot: normalized})
+            )
+            changes.append({"from": name, "to": normalized, "count": count})
+
+    db.commit()
+    return {"changes": changes, "total_updated": sum(c["count"] for c in changes)}
 
 
 @router.post("/extract-metadata", response_model=ExtractedMetadataResponse)

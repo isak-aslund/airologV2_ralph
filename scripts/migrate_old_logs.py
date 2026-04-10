@@ -26,7 +26,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
+import urllib3
 from bs4 import BeautifulSoup
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Add project root to path for backend imports
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -419,6 +422,17 @@ def cmd_upload(args):
         print(f"No manifest found at {manifest_path}. Run 'scrape' first.")
         return
 
+    if args.reset_upload_status:
+        count = 0
+        for r in rows:
+            if r["upload_status"] not in ("pending", ""):
+                r["upload_status"] = "pending"
+                r["upload_error"] = ""
+                r["new_id"] = ""
+                count += 1
+        save_manifest(manifest_path, rows)
+        print(f"Reset upload status for {count} entries.")
+
     # Filter candidates
     candidates = [
         r
@@ -490,6 +504,7 @@ def cmd_upload(args):
                     data=form_data,
                     files=files,
                     timeout=120,
+                    verify=False,
                 )
 
             if resp.status_code == 201:
@@ -736,6 +751,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Show what would be uploaded without doing it",
+    )
+    p_upload.add_argument(
+        "--reset-upload-status",
+        action="store_true",
+        help="Reset all upload statuses to pending (useful when switching target servers)",
     )
     p_upload.add_argument(
         "--workers",
