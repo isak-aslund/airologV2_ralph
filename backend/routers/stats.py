@@ -389,16 +389,26 @@ async def normalize_pilot_casing(
 async def fix_drone_models_by_serial(
     db: Session = Depends(get_db),
 ) -> dict:
-    """Fix drone_model for logs with non-standard SYS_AUTOSTART using serial prefix.
+    """Fix drone_model for logs that aren't a known model.
 
-    169250* -> 4006 (XLT), 169251* -> 4010 (S1), 169252* -> 4030 (CX10).
-    Anything else -> Unknown.
+    Strategy (in order):
+    1. Serial prefix: 169250*->XLT, 169251*->S1, 169252*->CX10
+    2. Re-extract SYS_AUTOSTART from .ulg file and map dev values
+    3. Fall back to Unknown
     """
     known = {"4006", "4010", "4030"}
     prefix_map = {
         "169250": "4006",
         "169251": "4010",
         "169252": "4030",
+    }
+    # Development SYS_AUTOSTART values seen in old logs
+    dev_autostart_map = {
+        "4001": "4030",  # CX10
+        "4002": "4006",  # XLT
+        "4004": "4006",  # XLT
+        "4005": "4006",  # XLT
+        "4007": "4006",  # XLT
     }
 
     logs = (
@@ -408,15 +418,33 @@ async def fix_drone_models_by_serial(
     )
 
     changes = []
+    still_unknown = 0
     for log in logs:
         serial = log.serial_number or ""
-        new_model = prefix_map.get(serial[:6], "Unknown")
+        new_model = prefix_map.get(serial[:6])
+
+        # Fallback: re-extract SYS_AUTOSTART from .ulg file
+        if not new_model and log.file_path:
+            try:
+                extracted = extract_metadata(log.file_path, original_filename=None)
+                raw_model = extracted.get("drone_model")
+                if raw_model in known:
+                    new_model = raw_model
+                elif raw_model in dev_autostart_map:
+                    new_model = dev_autostart_map[raw_model]
+            except Exception:
+                pass
+
+        if not new_model:
+            new_model = "Unknown"
+            still_unknown += 1
+
         if new_model != log.drone_model:
             changes.append({"old": log.drone_model, "new": new_model, "serial": serial})
             log.drone_model = new_model
 
     db.commit()
-    return {"fixed": len(changes), "total_checked": len(logs)}
+    return {"fixed": len(changes), "total_checked": len(logs), "still_unknown": still_unknown}
 
 
 @router.post("/extract-metadata", response_model=ExtractedMetadataResponse)
