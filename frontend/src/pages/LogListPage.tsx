@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import StatsHeader from '../components/StatsHeader'
 import FlightLogTable from '../components/FlightLogTable'
@@ -9,7 +9,9 @@ import Pagination from '../components/Pagination'
 import DeleteConfirmModal from '../components/DeleteConfirmModal'
 import ParameterModal from '../components/ParameterModal'
 import EditLogModal from '../components/EditLogModal'
-import { getLogs, downloadLog, uploadToFlightReview } from '../api/logs'
+import BulkDeleteConfirmModal from '../components/BulkDeleteConfirmModal'
+import CompareParametersModal from '../components/CompareParametersModal'
+import { getLogs, downloadLog, uploadToFlightReview, bulkDownloadLogs, getFilteredLogIds } from '../api/logs'
 import type { FlightLog, PaginatedResponse } from '../types'
 
 const VALID_PER_PAGE = [25, 50, 100] as const
@@ -37,6 +39,10 @@ function parseFiltersFromParams(searchParams: URLSearchParams): FilterState {
     towMin: searchParams.get('tow_min') || '',
     towMax: searchParams.get('tow_max') || '',
     hasAttachments: searchParams.get('has_attachments') || '',
+    session: searchParams.get('session') || '',
+    tagsLogic: (searchParams.get('tags_logic') as 'and' | 'or') || 'and',
+    flightModesLogic: (searchParams.get('flight_modes_logic') as 'and' | 'or') || 'and',
+    droneModelsLogic: (searchParams.get('drone_model_logic') as 'and' | 'or') || 'or',
   }
 }
 
@@ -53,6 +59,94 @@ function parsePerPageFromParams(searchParams: URLSearchParams): 25 | 50 | 100 {
   return VALID_PER_PAGE.includes(parsed as 25 | 50 | 100) ? (parsed as 25 | 50 | 100) : 25
 }
 
+function SelectActionsDropdown({
+  onSelectFiltered,
+  onClearSelection,
+  onDeleteSelected,
+  onCompareParameters,
+}: {
+  onSelectFiltered?: () => void
+  onClearSelection?: () => void
+  onDeleteSelected?: () => void
+  onCompareParameters?: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const hasOptions = !!onSelectFiltered || !!onClearSelection || !!onDeleteSelected || !!onCompareParameters
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        disabled={!hasOptions}
+        className={`p-2 rounded-md border transition-colors ${
+          hasOptions
+            ? 'border-gray-300 text-gray-600 hover:bg-gray-100'
+            : 'border-gray-200 text-gray-300 cursor-not-allowed'
+        }`}
+        title={hasOptions ? 'Selection actions' : 'Apply filters or select logs to see actions'}
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-1 w-52 bg-white border border-gray-200 rounded-md shadow-lg z-10 py-1">
+          {onCompareParameters && (
+            <button
+              type="button"
+              onClick={() => { onCompareParameters(); setOpen(false) }}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+            >
+              Compare parameters
+            </button>
+          )}
+          {onSelectFiltered && (
+            <button
+              type="button"
+              onClick={() => { onSelectFiltered(); setOpen(false) }}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+            >
+              Select filtered
+            </button>
+          )}
+          {onClearSelection && (
+            <button
+              type="button"
+              onClick={() => { onClearSelection(); setOpen(false) }}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+            >
+              Clear selection
+            </button>
+          )}
+          {onDeleteSelected && (
+            <>
+              <div className="border-t border-gray-200 my-1" />
+              <button
+                type="button"
+                onClick={() => { onDeleteSelected(); setOpen(false) }}
+                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+              >
+                Delete selected
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function LogListPage() {
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -63,6 +157,10 @@ export default function LogListPage() {
   const [parameterModalLog, setParameterModalLog] = useState<FlightLog | null>(null)
   const [editModalLog, setEditModalLog] = useState<FlightLog | null>(null)
   const [uploadingFlightReviewId, setUploadingFlightReviewId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDownloading, setBulkDownloading] = useState(false)
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
+  const [showCompareModal, setShowCompareModal] = useState(false)
 
   // Parse state from URL params
   const search = searchParams.get('search') || ''
@@ -110,8 +208,13 @@ export default function LogListPage() {
         tow_min: filters.towMin ? parseFloat(filters.towMin) : undefined,
         tow_max: filters.towMax ? parseFloat(filters.towMax) : undefined,
         has_attachments: filters.hasAttachments === 'true' ? true : filters.hasAttachments === 'false' ? false : undefined,
+        session: filters.session || undefined,
+        tags_logic: filters.tagsLogic !== 'and' ? filters.tagsLogic : undefined,
+        flight_modes_logic: filters.flightModesLogic !== 'and' ? filters.flightModesLogic : undefined,
+        drone_model_logic: filters.droneModelsLogic !== 'or' ? filters.droneModelsLogic : undefined,
       })
       setLogsData(data)
+      setSelectedIds(new Set())
     } catch (err) {
       setError('Failed to load flight logs')
       console.error('Error fetching logs:', err)
@@ -139,6 +242,10 @@ export default function LogListPage() {
       tow_min: newFilters.towMin || undefined,
       tow_max: newFilters.towMax || undefined,
       has_attachments: newFilters.hasAttachments || undefined,
+      session: newFilters.session || undefined,
+      tags_logic: newFilters.tagsLogic !== 'and' ? newFilters.tagsLogic : undefined,
+      flight_modes_logic: newFilters.flightModesLogic !== 'and' ? newFilters.flightModesLogic : undefined,
+      drone_model_logic: newFilters.droneModelsLogic !== 'or' ? newFilters.droneModelsLogic : undefined,
     }, true)
   }
 
@@ -183,6 +290,9 @@ export default function LogListPage() {
       case 'hasAttachments':
         newFilters.hasAttachments = ''
         break
+      case 'session':
+        newFilters.session = ''
+        break
     }
 
     // Update URL params based on modified filters
@@ -196,6 +306,10 @@ export default function LogListPage() {
       tow_min: newFilters.towMin || undefined,
       tow_max: newFilters.towMax || undefined,
       has_attachments: newFilters.hasAttachments || undefined,
+      session: newFilters.session || undefined,
+      tags_logic: newFilters.tagsLogic !== 'and' ? newFilters.tagsLogic : undefined,
+      flight_modes_logic: newFilters.flightModesLogic !== 'and' ? newFilters.flightModesLogic : undefined,
+      drone_model_logic: newFilters.droneModelsLogic !== 'or' ? newFilters.droneModelsLogic : undefined,
     }, true)
   }
 
@@ -216,7 +330,7 @@ export default function LogListPage() {
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${log.title.replace(/[^a-zA-Z0-9]/g, '_')}.ulg`
+      a.download = `${log.log_identifier || log.title.replace(/[^a-zA-Z0-9]/g, '_')}.ulg`
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)
@@ -226,6 +340,92 @@ export default function LogListPage() {
       alert('Failed to download log file')
     }
   }
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  const handleToggleAll = () => {
+    if (!logsData) return
+    const pageIds = logsData.items.map((l) => l.id)
+    const allSelected = pageIds.every((id) => selectedIds.has(id))
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (const id of pageIds) {
+        if (allSelected) {
+          next.delete(id)
+        } else {
+          next.add(id)
+        }
+      }
+      return next
+    })
+  }
+
+  const handleSelectFiltered = async () => {
+    try {
+      const ids = await getFilteredLogIds({
+        search: search || undefined,
+        drone_model: filters.droneModels.length > 0 ? filters.droneModels.join(',') : undefined,
+        pilot: filters.pilot || undefined,
+        tags: filters.tags.length > 0 ? filters.tags.join(',') : undefined,
+        flight_modes: filters.flightModes.length > 0 ? filters.flightModes.join(',') : undefined,
+        date_from: filters.dateFrom || undefined,
+        date_to: filters.dateTo || undefined,
+        tow_min: filters.towMin ? parseFloat(filters.towMin) : undefined,
+        tow_max: filters.towMax ? parseFloat(filters.towMax) : undefined,
+        has_attachments: filters.hasAttachments === 'true' ? true : filters.hasAttachments === 'false' ? false : undefined,
+        session: filters.session || undefined,
+        tags_logic: filters.tagsLogic !== 'and' ? filters.tagsLogic : undefined,
+        flight_modes_logic: filters.flightModesLogic !== 'and' ? filters.flightModesLogic : undefined,
+        drone_model_logic: filters.droneModelsLogic !== 'or' ? filters.droneModelsLogic : undefined,
+      })
+      setSelectedIds(new Set(ids))
+    } catch (err) {
+      console.error('Error selecting filtered logs:', err)
+    }
+  }
+
+  const handleBulkDownload = async () => {
+    if (selectedIds.size === 0) return
+    try {
+      setBulkDownloading(true)
+      const blob = await bulkDownloadLogs([...selectedIds])
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'flight_logs.zip'
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (err) {
+      console.error('Error bulk downloading logs:', err)
+      alert('Failed to download logs')
+    } finally {
+      setBulkDownloading(false)
+    }
+  }
+
+  const hasActiveFilters =
+    filters.dateFrom !== '' ||
+    filters.dateTo !== '' ||
+    filters.droneModels.length > 0 ||
+    filters.pilot !== '' ||
+    filters.tags.length > 0 ||
+    filters.flightModes.length > 0 ||
+    filters.towMin !== '' ||
+    filters.towMax !== '' ||
+    filters.hasAttachments !== '' ||
+    filters.session !== ''
 
   const handleEdit = (log: FlightLog) => {
     setEditModalLog(log)
@@ -292,13 +492,39 @@ export default function LogListPage() {
   }
 
   return (
-    <div className="container mx-auto p-4">
+    <div className="mx-auto p-4 max-w-[90%]">
       <StatsHeader />
       <h1 className="text-2xl font-bold mb-4">Flight Logs</h1>
 
-      {/* Search bar */}
-      <div className="mb-4">
+      {/* Search bar and bulk actions */}
+      <div className="mb-4 flex items-center gap-3">
         <SearchBar onSearch={handleSearch} initialValue={search} />
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={handleBulkDownload}
+            disabled={selectedIds.size === 0 || bulkDownloading}
+            title={selectedIds.size === 0 ? 'Select logs using the checkboxes to download' : `Download ${selectedIds.size} selected log(s) as zip`}
+            className={`px-4 py-2 text-sm font-medium text-white rounded-md whitespace-nowrap transition-colors ${
+              selectedIds.size > 0 && !bulkDownloading
+                ? 'bg-blue-600 hover:bg-blue-700'
+                : 'bg-gray-400 cursor-not-allowed'
+            }`}
+          >
+            {bulkDownloading && (
+              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            )}
+            {bulkDownloading ? 'Zipping...' : `Download${selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}`}
+          </button>
+          <SelectActionsDropdown
+            onSelectFiltered={hasActiveFilters ? handleSelectFiltered : undefined}
+            onClearSelection={selectedIds.size > 0 ? () => setSelectedIds(new Set()) : undefined}
+            onDeleteSelected={selectedIds.size > 0 ? () => setShowBulkDeleteModal(true) : undefined}
+            onCompareParameters={selectedIds.size >= 2 ? () => setShowCompareModal(true) : undefined}
+          />
+        </div>
       </div>
 
       {/* Active filter chips */}
@@ -324,6 +550,9 @@ export default function LogListPage() {
             onViewParameters={handleViewParameters}
             onOpenFlightReview={handleOpenFlightReview}
             uploadingFlightReviewId={uploadingFlightReviewId}
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
+            onToggleAll={handleToggleAll}
           />
 
           {/* Pagination */}
@@ -365,6 +594,27 @@ export default function LogListPage() {
           log={editModalLog}
           onClose={handleEditModalClose}
           onSaved={handleEditSaved}
+        />
+      )}
+
+      {/* Bulk delete confirmation modal */}
+      {showBulkDeleteModal && (
+        <BulkDeleteConfirmModal
+          ids={[...selectedIds]}
+          onClose={() => setShowBulkDeleteModal(false)}
+          onDeleted={() => {
+            setShowBulkDeleteModal(false)
+            setSelectedIds(new Set())
+            fetchLogs()
+          }}
+        />
+      )}
+
+      {/* Compare parameters modal */}
+      {showCompareModal && logsData && (
+        <CompareParametersModal
+          logs={logsData.items.filter((l) => selectedIds.has(l.id))}
+          onClose={() => setShowCompareModal(false)}
         />
       )}
     </div>

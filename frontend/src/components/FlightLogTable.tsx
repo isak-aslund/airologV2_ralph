@@ -120,6 +120,9 @@ interface FlightLogTableProps {
   onViewParameters?: (log: FlightLog) => void
   onOpenFlightReview?: (log: FlightLog) => Promise<void>
   uploadingFlightReviewId?: string | null
+  selectedIds?: Set<string>
+  onToggleSelect?: (id: string) => void
+  onToggleAll?: () => void
 }
 
 // Format duration from seconds to HH:MM:SS
@@ -224,7 +227,11 @@ export default function FlightLogTable({
   onViewParameters,
   onOpenFlightReview,
   uploadingFlightReviewId,
+  selectedIds,
+  onToggleSelect,
+  onToggleAll,
 }: FlightLogTableProps) {
+  const allPageSelected = logs.length > 0 && selectedIds ? logs.every((l) => selectedIds.has(l.id)) : false
   const [weatherLog, setWeatherLog] = useState<FlightLog | null>(null)
   const [mapLog, setMapLog] = useState<FlightLog | null>(null)
 
@@ -284,6 +291,16 @@ export default function FlightLogTable({
             <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Actions
             </th>
+            {onToggleSelect && (
+              <th scope="col" className="px-3 py-3 text-center">
+                <input
+                  type="checkbox"
+                  checked={allPageSelected}
+                  onChange={() => onToggleAll?.()}
+                  className="rounded border-gray-300 text-amber-500 focus:ring-amber-500"
+                />
+              </th>
+            )}
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
@@ -291,15 +308,13 @@ export default function FlightLogTable({
             <tr key={log.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
               {/* Thumbnail - only show for known drone models */}
               <td className="px-3 py-2 whitespace-nowrap">
-                {KNOWN_DRONE_MODELS.includes(log.drone_model as DroneModel) ? (
-                  <img
-                    src={`/img/${AUTOSTART_TO_MODEL[log.drone_model]}.png`}
-                    alt={`${AUTOSTART_TO_MODEL[log.drone_model]} drone`}
-                    className="w-10 h-10 object-contain"
-                  />
-                ) : (
-                  <div className="w-10 h-10" />
-                )}
+                <img
+                  src={KNOWN_DRONE_MODELS.includes(log.drone_model as DroneModel)
+                    ? `/img/${AUTOSTART_TO_MODEL[log.drone_model]}.png`
+                    : '/img/drone_placeholder.png'}
+                  alt={`${AUTOSTART_TO_MODEL[log.drone_model] || log.drone_model} drone`}
+                  className="h-8 min-w-8 object-contain"
+                />
               </td>
               {/* Model */}
               <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
@@ -365,9 +380,12 @@ export default function FlightLogTable({
               {/* Session */}
               <td className="px-3 py-2 whitespace-nowrap text-sm">
                 {log.session ? (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                  <Link
+                    to={`/?session=${encodeURIComponent(log.session)}`}
+                    className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 hover:bg-purple-200 transition-colors"
+                  >
                     {log.session}
-                  </span>
+                  </Link>
                 ) : (
                   <span className="text-gray-400">--</span>
                 )}
@@ -527,6 +545,16 @@ export default function FlightLogTable({
                   )}
                 </div>
               </td>
+              {onToggleSelect && (
+                <td className="px-3 py-2 text-center">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds?.has(log.id) ?? false}
+                    onChange={() => onToggleSelect(log.id)}
+                    className="rounded border-gray-300 text-amber-500 focus:ring-amber-500"
+                  />
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

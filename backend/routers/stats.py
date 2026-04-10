@@ -4,8 +4,9 @@ import os
 import tempfile
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy import func
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -75,6 +76,21 @@ async def get_pilots(
         .all()
     )
     return [p[0] for p in pilots if p[0]]
+
+
+@router.get("/sessions")
+async def get_sessions(
+    db: Session = Depends(get_db),
+) -> list[str]:
+    """Get list of unique session names for filtering."""
+    sessions = (
+        db.query(FlightLog.session)
+        .filter(FlightLog.session.isnot(None), FlightLog.session != "")
+        .distinct()
+        .order_by(FlightLog.session)
+        .all()
+    )
+    return [s[0] for s in sessions]
 
 
 @router.get("/drone-models")
@@ -274,6 +290,134 @@ async def get_records(
         "current_streak_days": streak,
         "total_flight_days": total_flight_days,
     }
+
+
+class PilotMergeRequest(BaseModel):
+    from_name: str
+    to_name: str
+    before_date: str | None = None
+    after_date: str | None = None
+
+
+class PilotMergeResponse(BaseModel):
+    updated: int
+    from_name: str
+    to_name: str
+
+
+@router.post("/pilots/merge", response_model=PilotMergeResponse)
+async def merge_pilot(
+    request: PilotMergeRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Rename logs from one pilot name to another.
+
+    Optionally filter by date range:
+    - before_date: only rename logs with flight_date before this (YYYY-MM-DD)
+    - after_date: only rename logs with flight_date on or after this (YYYY-MM-DD)
+    """
+    from_name = request.from_name.strip()
+    to_name = request.to_name.strip().title()
+
+    if not from_name or not to_name:
+        raise HTTPException(status_code=400, detail="Both from_name and to_name are required")
+
+    query = db.query(FlightLog).filter(FlightLog.pilot == from_name)
+
+    if request.before_date:
+        try:
+            cutoff = datetime.fromisoformat(request.before_date)
+            query = query.filter(FlightLog.flight_date < cutoff)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid before_date format, use YYYY-MM-DD")
+
+    if request.after_date:
+        try:
+            cutoff = datetime.fromisoformat(request.after_date)
+            query = query.filter(FlightLog.flight_date >= cutoff)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid after_date format, use YYYY-MM-DD")
+
+    count = query.count()
+
+    if count == 0:
+        raise HTTPException(status_code=404, detail=f"No matching logs found for pilot '{from_name}'")
+
+    # Build the same filter for the update
+    stmt = update(FlightLog).where(FlightLog.pilot == from_name)
+    if request.before_date:
+        stmt = stmt.where(FlightLog.flight_date < datetime.fromisoformat(request.before_date))
+    if request.after_date:
+        stmt = stmt.where(FlightLog.flight_date >= datetime.fromisoformat(request.after_date))
+    stmt = stmt.values(pilot=to_name)
+
+    db.execute(stmt)
+    db.commit()
+
+    return {"updated": count, "from_name": from_name, "to_name": to_name}
+
+
+@router.post("/pilots/normalize-casing")
+async def normalize_pilot_casing(
+    db: Session = Depends(get_db),
+) -> dict:
+    """Title-case all pilot names (e.g. 'patrik' -> 'Patrik')."""
+    pilots = (
+        db.query(FlightLog.pilot)
+        .distinct()
+        .all()
+    )
+
+    changes = []
+    for (name,) in pilots:
+        if not name:
+            continue
+        normalized = name.strip().title()
+        if normalized != name:
+            count = (
+                db.query(FlightLog)
+                .filter(FlightLog.pilot == name)
+                .update({FlightLog.pilot: normalized})
+            )
+            changes.append({"from": name, "to": normalized, "count": count})
+
+    db.commit()
+    return {"changes": changes, "total_updated": sum(c["count"] for c in changes)}
+
+
+@router.post("/drone-models/fix-by-serial")
+async def fix_drone_models_by_serial(
+    db: Session = Depends(get_db),
+) -> dict:
+    """Fix drone_model for logs with non-standard SYS_AUTOSTART using serial prefix.
+
+    169250* -> 4006 (XLT), 169251* -> 4010 (S1), 169252* -> 4030 (CX10).
+    Anything else -> Unknown.
+    """
+    known = {"4006", "4010", "4030"}
+    prefix_map = {
+        "169250": "4006",  # XLT
+        "169251": "4010",  # S1
+        "169252": "4030",  # CX10
+        "133700": "4010",  # Prototype S1
+    }
+
+    logs = (
+        db.query(FlightLog)
+        .filter(FlightLog.drone_model.notin_(known))
+        .all()
+    )
+
+    changes = []
+    for log in logs:
+        serial = log.serial_number or ""
+        new_model = prefix_map.get(serial[:6], "Unknown")
+        if new_model != log.drone_model:
+            changes.append({"old": log.drone_model, "new": new_model, "serial": serial})
+            log.drone_model = new_model
+
+    db.commit()
+    return {"fixed": len(changes), "total_checked": len(logs)}
 
 
 @router.post("/extract-metadata", response_model=ExtractedMetadataResponse)

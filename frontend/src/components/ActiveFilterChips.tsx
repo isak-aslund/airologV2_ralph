@@ -95,6 +95,14 @@ export default function ActiveFilterChips({ filters, onRemoveFilter }: ActiveFil
     })
   }
 
+  // Session chip
+  if (filters.session) {
+    chips.push({
+      label: `Session: ${filters.session}`,
+      type: 'session',
+    })
+  }
+
   // Attachments filter chip
   if (filters.hasAttachments === 'true') {
     chips.push({

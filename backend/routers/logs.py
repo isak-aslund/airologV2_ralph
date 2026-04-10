@@ -7,10 +7,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import io
+import zipfile
+
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
-from sqlalchemy import func, or_
+from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from backend.config import settings
@@ -31,61 +35,24 @@ from backend.services.ulog_parser import extract_metadata, get_parameters
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 
 
-@router.get("", response_model=PaginatedResponse[FlightLogResponse])
-async def list_logs(
-    page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
-    per_page: int = Query(default=25, description="Items per page (25, 50, or 100)"),
-    search: Optional[str] = Query(
-        default=None, description="Search in title, pilot, comment, serial_number"
-    ),
-    drone_model: Optional[str] = Query(
-        default=None, description="Comma-separated drone models (XLT, S1, CX10)"
-    ),
-    pilot: Optional[str] = Query(default=None, description="Exact pilot name match"),
-    tags: Optional[str] = Query(
-        default=None, description="Comma-separated tag names"
-    ),
-    flight_modes: Optional[str] = Query(
-        default=None, description="Comma-separated flight mode names"
-    ),
-    date_from: Optional[datetime] = Query(
-        default=None, description="Filter logs from this date (ISO format)"
-    ),
-    date_to: Optional[datetime] = Query(
-        default=None, description="Filter logs up to this date (ISO format)"
-    ),
-    tow_min: Optional[float] = Query(
-        default=None, description="Minimum takeoff weight in kg"
-    ),
-    tow_max: Optional[float] = Query(
-        default=None, description="Maximum takeoff weight in kg"
-    ),
-    has_attachments: Optional[bool] = Query(
-        default=None, description="Filter by whether log has attachments"
-    ),
-    db: Session = Depends(get_db),
-) -> dict:
-    """
-    List flight logs with pagination, search, and filtering.
-
-    - page: Page number starting from 1
-    - per_page: 25, 50, or 100 items per page
-    - search: Case-insensitive search in title, pilot, comment, serial_number
-    - drone_model: Comma-separated list of models to filter (e.g., "XLT,S1")
-    - pilot: Exact match for pilot name
-    - tags: Comma-separated tag names to filter by
-    - date_from: ISO date to filter logs from
-    - date_to: ISO date to filter logs up to
-    - tow_min: Minimum takeoff weight in kg
-    - tow_max: Maximum takeoff weight in kg
-    """
-    # Validate per_page
-    if per_page not in (25, 50, 100):
-        per_page = 25
-
-    query = db.query(FlightLog)
-
-    # Apply search filter (case-insensitive)
+def _apply_log_filters(
+    query,
+    search: Optional[str] = None,
+    drone_model: Optional[str] = None,
+    pilot: Optional[str] = None,
+    tags: Optional[str] = None,
+    flight_modes: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    tow_min: Optional[float] = None,
+    tow_max: Optional[float] = None,
+    has_attachments: Optional[bool] = None,
+    session: Optional[str] = None,
+    tags_logic: str = "and",
+    flight_modes_logic: str = "and",
+    drone_model_logic: str = "or",
+):
+    """Apply search and filter criteria to a FlightLog query."""
     if search:
         search_term = f"%{search.lower()}%"
         query = query.filter(
@@ -98,69 +65,124 @@ async def list_logs(
             )
         )
 
-    # Apply drone_model filter
     if drone_model:
         model_names = [m.strip() for m in drone_model.split(",") if m.strip()]
         if model_names:
+            # AND is impossible for drone_model (single value per log), always use OR
             query = query.filter(FlightLog.drone_model.in_(model_names))
 
-    # Apply pilot exact match filter
     if pilot:
         query = query.filter(FlightLog.pilot == pilot)
 
-    # Apply tags filter
     if tags:
         tag_names = [t.strip().lower() for t in tags.split(",") if t.strip()]
         if tag_names:
-            # Filter logs that have ALL specified tags
-            for tag_name in tag_names:
-                query = query.filter(
-                    FlightLog.tags.any(Tag.name == tag_name)
-                )
+            if tags_logic == "or":
+                query = query.filter(FlightLog.tags.any(Tag.name.in_(tag_names)))
+            else:
+                for tag_name in tag_names:
+                    query = query.filter(FlightLog.tags.any(Tag.name == tag_name))
 
-    # Apply flight_modes filter (logs must contain ALL specified modes)
     if flight_modes:
         mode_names = [m.strip() for m in flight_modes.split(",") if m.strip()]
         if mode_names:
-            # For SQLite JSON, use JSON_EACH to check if mode exists in the array
-            from sqlalchemy import text
-            for mode_name in mode_names:
-                # Check if the JSON array contains the mode using SQLite json_each
+            if flight_modes_logic == "or":
+                conditions = " OR ".join(
+                    f"json_each.value = :mode_{i}" for i in range(len(mode_names))
+                )
+                bind_params = {f"mode_{i}": m for i, m in enumerate(mode_names)}
                 query = query.filter(
                     text(
-                        "EXISTS (SELECT 1 FROM json_each(flight_logs.flight_modes) WHERE json_each.value = :mode)"
-                    ).bindparams(mode=mode_name)
+                        f"EXISTS (SELECT 1 FROM json_each(flight_logs.flight_modes) WHERE {conditions})"
+                    ).bindparams(**bind_params)
                 )
+            else:
+                for mode_name in mode_names:
+                    query = query.filter(
+                        text(
+                            "EXISTS (SELECT 1 FROM json_each(flight_logs.flight_modes) WHERE json_each.value = :mode)"
+                        ).bindparams(mode=mode_name)
+                    )
 
-    # Apply date range filters
     if date_from:
         query = query.filter(FlightLog.flight_date >= date_from)
     if date_to:
         query = query.filter(FlightLog.flight_date <= date_to)
 
-    # Apply TOW range filters
     if tow_min is not None:
         query = query.filter(FlightLog.tow >= tow_min)
     if tow_max is not None:
         query = query.filter(FlightLog.tow <= tow_max)
 
-    # Apply has_attachments filter
     if has_attachments is True:
         query = query.filter(FlightLog.attachments.any())
     elif has_attachments is False:
         query = query.filter(~FlightLog.attachments.any())
 
-    # Order by flight_date descending
+    if session:
+        query = query.filter(FlightLog.session == session)
+
+    return query
+
+
+# Common filter query parameters used by list_logs and list_log_ids
+_FILTER_PARAMS = {
+    "search": Query(default=None, description="Search in title, pilot, comment, serial_number, session"),
+    "drone_model": Query(default=None, description="Comma-separated drone models"),
+    "pilot": Query(default=None, description="Exact pilot name match"),
+    "tags": Query(default=None, description="Comma-separated tag names"),
+    "flight_modes": Query(default=None, description="Comma-separated flight mode names"),
+    "date_from": Query(default=None, description="Filter logs from this date (ISO format)"),
+    "date_to": Query(default=None, description="Filter logs up to this date (ISO format)"),
+    "tow_min": Query(default=None, description="Minimum takeoff weight in kg"),
+    "tow_max": Query(default=None, description="Maximum takeoff weight in kg"),
+    "has_attachments": Query(default=None, description="Filter by whether log has attachments"),
+    "session": Query(default=None, description="Exact session match"),
+    "tags_logic": Query(default="and", description="'and' or 'or' for tag matching"),
+    "flight_modes_logic": Query(default="and", description="'and' or 'or' for flight mode matching"),
+    "drone_model_logic": Query(default="or", description="'and' or 'or' for drone model matching"),
+}
+
+
+@router.get("", response_model=PaginatedResponse[FlightLogResponse])
+async def list_logs(
+    page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
+    per_page: int = Query(default=25, description="Items per page (25, 50, or 100)"),
+    search: Optional[str] = _FILTER_PARAMS["search"],
+    drone_model: Optional[str] = _FILTER_PARAMS["drone_model"],
+    pilot: Optional[str] = _FILTER_PARAMS["pilot"],
+    tags: Optional[str] = _FILTER_PARAMS["tags"],
+    flight_modes: Optional[str] = _FILTER_PARAMS["flight_modes"],
+    date_from: Optional[datetime] = _FILTER_PARAMS["date_from"],
+    date_to: Optional[datetime] = _FILTER_PARAMS["date_to"],
+    tow_min: Optional[float] = _FILTER_PARAMS["tow_min"],
+    tow_max: Optional[float] = _FILTER_PARAMS["tow_max"],
+    has_attachments: Optional[bool] = _FILTER_PARAMS["has_attachments"],
+    session: Optional[str] = _FILTER_PARAMS["session"],
+    tags_logic: Optional[str] = _FILTER_PARAMS["tags_logic"],
+    flight_modes_logic: Optional[str] = _FILTER_PARAMS["flight_modes_logic"],
+    drone_model_logic: Optional[str] = _FILTER_PARAMS["drone_model_logic"],
+    db: Session = Depends(get_db),
+) -> dict:
+    """List flight logs with pagination, search, and filtering."""
+    if per_page not in (25, 50, 100):
+        per_page = 25
+
+    query = _apply_log_filters(
+        db.query(FlightLog),
+        search=search, drone_model=drone_model, pilot=pilot, tags=tags,
+        flight_modes=flight_modes, date_from=date_from, date_to=date_to,
+        tow_min=tow_min, tow_max=tow_max, has_attachments=has_attachments,
+        session=session, tags_logic=tags_logic or "and",
+        flight_modes_logic=flight_modes_logic or "and",
+        drone_model_logic=drone_model_logic or "or",
+    )
+
     query = query.order_by(FlightLog.flight_date.desc())
 
-    # Get total count
     total = query.count()
-
-    # Calculate pagination
     total_pages = max(1, math.ceil(total / per_page))
     offset = (page - 1) * per_page
-
-    # Get paginated results
     items = query.offset(offset).limit(per_page).all()
 
     return {
@@ -170,6 +192,115 @@ async def list_logs(
         "per_page": per_page,
         "total_pages": total_pages,
     }
+
+
+@router.get("/ids")
+async def list_log_ids(
+    search: Optional[str] = _FILTER_PARAMS["search"],
+    drone_model: Optional[str] = _FILTER_PARAMS["drone_model"],
+    pilot: Optional[str] = _FILTER_PARAMS["pilot"],
+    tags: Optional[str] = _FILTER_PARAMS["tags"],
+    flight_modes: Optional[str] = _FILTER_PARAMS["flight_modes"],
+    date_from: Optional[datetime] = _FILTER_PARAMS["date_from"],
+    date_to: Optional[datetime] = _FILTER_PARAMS["date_to"],
+    tow_min: Optional[float] = _FILTER_PARAMS["tow_min"],
+    tow_max: Optional[float] = _FILTER_PARAMS["tow_max"],
+    has_attachments: Optional[bool] = _FILTER_PARAMS["has_attachments"],
+    session: Optional[str] = _FILTER_PARAMS["session"],
+    tags_logic: Optional[str] = _FILTER_PARAMS["tags_logic"],
+    flight_modes_logic: Optional[str] = _FILTER_PARAMS["flight_modes_logic"],
+    drone_model_logic: Optional[str] = _FILTER_PARAMS["drone_model_logic"],
+    db: Session = Depends(get_db),
+) -> list[str]:
+    """Return all log IDs matching the given filters (no pagination)."""
+    query = _apply_log_filters(
+        db.query(FlightLog.id),
+        search=search, drone_model=drone_model, pilot=pilot, tags=tags,
+        flight_modes=flight_modes, date_from=date_from, date_to=date_to,
+        tow_min=tow_min, tow_max=tow_max, has_attachments=has_attachments,
+        session=session, tags_logic=tags_logic or "and",
+        flight_modes_logic=flight_modes_logic or "and",
+        drone_model_logic=drone_model_logic or "or",
+    )
+    return [row[0] for row in query.all()]
+
+
+class BulkDownloadRequest(BaseModel):
+    ids: list[str]
+
+
+@router.post("/bulk-download")
+async def bulk_download(
+    request: BulkDownloadRequest,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Download multiple flight logs as a zip file."""
+    if not request.ids:
+        raise HTTPException(status_code=400, detail="No log IDs provided")
+    if len(request.ids) > 500:
+        raise HTTPException(status_code=400, detail="Too many logs (max 500)")
+
+    logs = db.query(FlightLog).filter(FlightLog.id.in_(request.ids)).all()
+    if not logs:
+        raise HTTPException(status_code=404, detail="No logs found")
+
+    buffer = io.BytesIO()
+    used_names: dict[str, int] = {}
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for log in logs:
+            file_path = Path(log.file_path)
+            if not file_path.exists():
+                continue
+            base_name = f"{log.log_identifier}.ulg" if log.log_identifier else f"{log.title.replace(' ', '_')}.ulg"
+            # Deduplicate filenames
+            if base_name in used_names:
+                used_names[base_name] += 1
+                stem, ext = base_name.rsplit(".", 1)
+                base_name = f"{stem}_{used_names[base_name]}.{ext}"
+            else:
+                used_names[base_name] = 1
+            zf.write(file_path, base_name)
+
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=flight_logs.zip"},
+    )
+
+
+@router.post("/bulk-delete")
+async def bulk_delete(
+    request: BulkDownloadRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    """Delete multiple flight logs and their associated files."""
+    if not request.ids:
+        raise HTTPException(status_code=400, detail="No log IDs provided")
+
+    logs = db.query(FlightLog).filter(FlightLog.id.in_(request.ids)).all()
+    deleted = 0
+    for log in logs:
+        # Delete .ulg file
+        file_path = Path(log.file_path)
+        if file_path.exists():
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+        # Delete attachment files
+        for attachment in log.attachments:
+            att_path = Path(attachment.file_path)
+            if att_path.exists():
+                try:
+                    os.remove(att_path)
+                except Exception:
+                    pass
+        db.delete(log)
+        deleted += 1
+
+    db.commit()
+    return {"deleted": deleted}
 
 
 def get_or_create_tags(db: Session, tag_names: list[str]) -> list[Tag]:
@@ -393,12 +524,25 @@ async def create_log(
     # Get or create tags
     tag_objects = get_or_create_tags(db, tag_names)
 
+    # Resolve drone_model: if not a known model, try serial prefix
+    SERIAL_PREFIX_TO_MODEL = {
+        "169250": "4006",  # XLT
+        "169251": "4010",  # S1
+        "169252": "4030",  # CX10
+        "133700": "4010",  # Prototype S1
+    }
+    KNOWN_MODELS = {"4006", "4010", "4030"}
+    final_drone_model = drone_model
+    if drone_model not in KNOWN_MODELS and final_serial_number:
+        prefix = final_serial_number[:6]
+        final_drone_model = SERIAL_PREFIX_TO_MODEL.get(prefix, drone_model)
+
     # Create flight log record
     flight_log = FlightLog(
         id=log_id,
         title=title,
-        pilot=pilot,
-        drone_model=drone_model,
+        pilot=pilot.strip().title(),
+        drone_model=final_drone_model,
         serial_number=final_serial_number,
         log_identifier=log_identifier,
         file_path=str(file_path),
@@ -457,7 +601,7 @@ async def update_log(
     if update_data.title is not None:
         flight_log.title = update_data.title
     if update_data.pilot is not None:
-        flight_log.pilot = update_data.pilot
+        flight_log.pilot = update_data.pilot.strip().title()
     if update_data.drone_model is not None:
         flight_log.drone_model = update_data.drone_model
     if update_data.comment is not None:
@@ -537,8 +681,8 @@ async def download_log(
             detail="File not found on disk",
         )
 
-    # Use a descriptive filename for download
-    filename = f"{flight_log.title.replace(' ', '_')}_{log_id}.ulg"
+    # Use original uploaded filename for download, fall back to title
+    filename = f"{flight_log.log_identifier}.ulg" if flight_log.log_identifier else f"{flight_log.title.replace(' ', '_')}.ulg"
 
     return FileResponse(
         path=file_path,

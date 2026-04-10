@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { getPilots, getDroneModels } from '../api/pilots'
+import { getPilots, getDroneModels, getSessions } from '../api/pilots'
 import { getTags } from '../api/tags'
+import AndOrToggle from './AndOrToggle'
 import type { Tag } from '../types'
 
 // Map SYS_AUTOSTART values to model names (for display hints)
@@ -36,6 +37,10 @@ export interface FilterState {
   towMin: string  // Minimum TOW in kg (string for input handling)
   towMax: string  // Maximum TOW in kg (string for input handling)
   hasAttachments: string  // '' = any, 'true' = with, 'false' = without
+  session: string
+  tagsLogic: 'and' | 'or'
+  flightModesLogic: 'and' | 'or'
+  droneModelsLogic: 'and' | 'or'
 }
 
 interface FilterPanelProps {
@@ -57,12 +62,20 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
   const [droneModelsLoading, setDroneModelsLoading] = useState(false)
   const [allTags, setAllTags] = useState<Tag[]>([])
   const [tagsLoading, setTagsLoading] = useState(false)
+  const [sessions, setSessions] = useState<string[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
   const [tagDropdownOpen, setTagDropdownOpen] = useState(false)
   const [tagSearch, setTagSearch] = useState('')
   const tagDropdownRef = useRef<HTMLDivElement>(null)
   const [modeDropdownOpen, setModeDropdownOpen] = useState(false)
   const [modeSearch, setModeSearch] = useState('')
   const modeDropdownRef = useRef<HTMLDivElement>(null)
+  const [pilotDropdownOpen, setPilotDropdownOpen] = useState(false)
+  const [pilotSearch, setPilotSearch] = useState('')
+  const pilotDropdownRef = useRef<HTMLDivElement>(null)
+  const [sessionDropdownOpen, setSessionDropdownOpen] = useState(false)
+  const [sessionSearch, setSessionSearch] = useState('')
+  const sessionDropdownRef = useRef<HTMLDivElement>(null)
 
   // Fetch pilots list on mount
   useEffect(() => {
@@ -112,6 +125,22 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     fetchTags()
   }, [])
 
+  // Fetch sessions list on mount
+  useEffect(() => {
+    async function fetchSessions() {
+      try {
+        setSessionsLoading(true)
+        const data = await getSessions()
+        setSessions(data)
+      } catch (err) {
+        console.error('Error fetching sessions:', err)
+      } finally {
+        setSessionsLoading(false)
+      }
+    }
+    fetchSessions()
+  }, [])
+
   // Close tag dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -120,6 +149,12 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
       }
       if (modeDropdownRef.current && !modeDropdownRef.current.contains(event.target as Node)) {
         setModeDropdownOpen(false)
+      }
+      if (pilotDropdownRef.current && !pilotDropdownRef.current.contains(event.target as Node)) {
+        setPilotDropdownOpen(false)
+      }
+      if (sessionDropdownRef.current && !sessionDropdownRef.current.contains(event.target as Node)) {
+        setSessionDropdownOpen(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -148,12 +183,7 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     })
   }
 
-  function handlePilotChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    onFilterChange({
-      ...filters,
-      pilot: e.target.value,
-    })
-  }
+
 
   function handleTagToggle(tagName: string) {
     const isSelected = filters.tags.includes(tagName)
@@ -212,6 +242,8 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     })
   }
 
+
+
   function handleClearAll() {
     onFilterChange({
       dateFrom: '',
@@ -223,6 +255,10 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
       towMin: '',
       towMax: '',
       hasAttachments: '',
+      session: '',
+      tagsLogic: 'and',
+      flightModesLogic: 'and',
+      droneModelsLogic: 'or',
     })
   }
 
@@ -236,6 +272,14 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     mode.toLowerCase().includes(modeSearch.toLowerCase())
   )
 
+  const filteredPilots = pilots.filter((p) =>
+    p.toLowerCase().includes(pilotSearch.toLowerCase())
+  )
+
+  const filteredSessions = sessions.filter((s) =>
+    s.toLowerCase().includes(sessionSearch.toLowerCase())
+  )
+
   // Check if any filters are active
   const hasActiveFilters =
     filters.dateFrom !== '' ||
@@ -246,7 +290,8 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
     filters.flightModes.length > 0 ||
     filters.towMin !== '' ||
     filters.towMax !== '' ||
-    filters.hasAttachments !== ''
+    filters.hasAttachments !== '' ||
+    filters.session !== ''
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg mb-4">
@@ -342,30 +387,73 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
               </select>
             </div>
 
-            {/* Pilot dropdown */}
-            <div>
-              <label htmlFor="pilot" className="block text-sm font-medium text-gray-700 mb-1">
-                Pilot
-              </label>
-              <select
-                id="pilot"
-                value={filters.pilot}
-                onChange={handlePilotChange}
+            {/* Pilot searchable dropdown */}
+            <div ref={pilotDropdownRef} className="relative">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Pilot</label>
+              <button
+                type="button"
+                onClick={() => setPilotDropdownOpen(!pilotDropdownOpen)}
                 disabled={pilotsLoading}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed flex items-center justify-between"
               >
-                <option value="">All pilots</option>
-                {pilots.map((pilot) => (
-                  <option key={pilot} value={pilot}>
-                    {pilot}
-                  </option>
-                ))}
-              </select>
+                <span className={!filters.pilot ? 'text-gray-500' : ''}>
+                  {filters.pilot || 'All pilots'}
+                </span>
+                <svg
+                  className={`h-5 w-5 text-gray-400 transition-transform ${pilotDropdownOpen ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {pilotDropdownOpen && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-hidden">
+                  <div className="p-2 border-b border-gray-200">
+                    <input
+                      type="text"
+                      placeholder="Search pilots..."
+                      value={pilotSearch}
+                      onChange={(e) => setPilotSearch(e.target.value)}
+                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="max-h-40 overflow-y-auto">
+                    <button
+                      type="button"
+                      onClick={() => { onFilterChange({ ...filters, pilot: '' }); setPilotDropdownOpen(false); setPilotSearch('') }}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${!filters.pilot ? 'bg-blue-50 text-blue-800' : 'text-gray-700'}`}
+                    >
+                      All pilots
+                    </button>
+                    {filteredPilots.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => { onFilterChange({ ...filters, pilot: p }); setPilotDropdownOpen(false); setPilotSearch('') }}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${filters.pilot === p ? 'bg-blue-50 text-blue-800' : 'text-gray-700'}`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                    {filteredPilots.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500">No matching pilots</div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Tag filter with multi-select dropdown */}
             <div ref={tagDropdownRef} className="relative">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Tags</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm font-medium text-gray-700">Tags</label>
+                <AndOrToggle
+                  value={filters.tagsLogic}
+                  onChange={(v) => onFilterChange({ ...filters, tagsLogic: v })}
+                />
+              </div>
               <button
                 type="button"
                 onClick={() => setTagDropdownOpen(!tagDropdownOpen)}
@@ -429,7 +517,13 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
 
             {/* Flight Modes filter with multi-select dropdown */}
             <div ref={modeDropdownRef} className="relative">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Flight Modes</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm font-medium text-gray-700">Flight Modes</label>
+                <AndOrToggle
+                  value={filters.flightModesLogic}
+                  onChange={(v) => onFilterChange({ ...filters, flightModesLogic: v })}
+                />
+              </div>
               <button
                 type="button"
                 onClick={() => setModeDropdownOpen(!modeDropdownOpen)}
@@ -531,6 +625,64 @@ export default function FilterPanel({ filters, onFilterChange }: FilterPanelProp
                 <option value="true">With attachments</option>
                 <option value="false">Without attachments</option>
               </select>
+            </div>
+
+            {/* Session searchable dropdown */}
+            <div ref={sessionDropdownRef} className="relative">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Session</label>
+              <button
+                type="button"
+                onClick={() => setSessionDropdownOpen(!sessionDropdownOpen)}
+                disabled={sessionsLoading}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed flex items-center justify-between"
+              >
+                <span className={!filters.session ? 'text-gray-500' : ''}>
+                  {filters.session || 'All sessions'}
+                </span>
+                <svg
+                  className={`h-5 w-5 text-gray-400 transition-transform ${sessionDropdownOpen ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {sessionDropdownOpen && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-hidden">
+                  <div className="p-2 border-b border-gray-200">
+                    <input
+                      type="text"
+                      placeholder="Search sessions..."
+                      value={sessionSearch}
+                      onChange={(e) => setSessionSearch(e.target.value)}
+                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="max-h-40 overflow-y-auto">
+                    <button
+                      type="button"
+                      onClick={() => { onFilterChange({ ...filters, session: '' }); setSessionDropdownOpen(false); setSessionSearch('') }}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${!filters.session ? 'bg-blue-50 text-blue-800' : 'text-gray-700'}`}
+                    >
+                      All sessions
+                    </button>
+                    {filteredSessions.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => { onFilterChange({ ...filters, session: s }); setSessionDropdownOpen(false); setSessionSearch('') }}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${filters.session === s ? 'bg-blue-50 text-blue-800' : 'text-gray-700'}`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                    {filteredSessions.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500">No matching sessions</div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

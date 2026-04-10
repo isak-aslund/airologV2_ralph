@@ -15,3 +15,8 @@ export async function getDroneModels(): Promise<string[]> {
   const response = await client.get<string[]>('/drone-models')
   return response.data
 }
+
+export async function getSessions(): Promise<string[]> {
+  const response = await client.get<string[]>('/sessions')
+  return response.data
+}
