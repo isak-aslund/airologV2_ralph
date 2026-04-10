@@ -20,6 +20,8 @@ import os
 import re
 import signal
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -322,19 +324,18 @@ def cmd_scrape(args):
         print("All files already downloaded.")
         return
 
-    print(f"Downloading {len(to_download)} files...\n")
+    workers = args.workers
+    print(f"Downloading {len(to_download)} files ({workers} workers)...\n")
 
     downloaded = 0
     failed = 0
-    batch_counter = 0
+    completed_count = 0
+    total = len(to_download)
+    manifest_lock = threading.Lock()
 
-    for i, row in enumerate(to_download):
-        if _shutdown_requested:
-            break
-
+    def _download_one(row: dict) -> tuple[dict, str, int]:
+        """Download a single file. Returns (row, status, size)."""
         dest = data_dir / row["local_path"]
-        progress = f"[{i + 1}/{len(to_download)}]"
-
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
             tmp_dest = dest.with_suffix(".ulg.tmp")
@@ -349,27 +350,46 @@ def cmd_scrape(args):
                     size += len(chunk)
 
             tmp_dest.rename(dest)
-
-            row["scrape_status"] = "downloaded"
-            row["file_size"] = str(size)
-            row["scrape_error"] = ""
-            downloaded += 1
-            print(f"  {progress} OK  #{row['old_id']} {row['filename']} ({_fmt_size(size)})")
+            return (row, "ok", size)
 
         except Exception as e:
-            row["scrape_status"] = "failed"
-            row["scrape_error"] = str(e)
-            failed += 1
-            print(f"  {progress} ERR #{row['old_id']} {row['filename']}: {e}")
-            # Clean up partial download
             tmp_path = dest.with_suffix(".ulg.tmp")
             if tmp_path.exists():
                 tmp_path.unlink()
+            return (row, str(e), 0)
 
-        batch_counter += 1
-        if batch_counter >= args.batch_size:
-            save_manifest(manifest_path, existing)
-            batch_counter = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {}
+        for row in to_download:
+            if _shutdown_requested:
+                break
+            fut = pool.submit(_download_one, row)
+            futures[fut] = row
+
+        for fut in as_completed(futures):
+            if _shutdown_requested:
+                pool.shutdown(wait=False, cancel_futures=True)
+                break
+
+            row, status, size = fut.result()
+            completed_count += 1
+            progress = f"[{completed_count}/{total}]"
+
+            if status == "ok":
+                row["scrape_status"] = "downloaded"
+                row["file_size"] = str(size)
+                row["scrape_error"] = ""
+                downloaded += 1
+                print(f"  {progress} OK  #{row['old_id']} {row['filename']} ({_fmt_size(size)})")
+            else:
+                row["scrape_status"] = "failed"
+                row["scrape_error"] = status
+                failed += 1
+                print(f"  {progress} ERR #{row['old_id']} {row['filename']}: {status}")
+
+            if completed_count % args.batch_size == 0:
+                with manifest_lock:
+                    save_manifest(manifest_path, existing)
 
     # Final save
     save_manifest(manifest_path, existing)
@@ -422,29 +442,24 @@ def cmd_upload(args):
             print(f"  ... and {len(candidates) - 20} more")
         return
 
-    print(f"Uploading {len(candidates)} logs to {args.target_server}\n")
+    workers = args.workers
+    print(f"Uploading {len(candidates)} logs to {args.target_server} ({workers} workers)\n")
 
     uploaded = 0
     duplicates = 0
     failed = 0
-    batch_counter = 0
+    completed_count = 0
+    total = len(candidates)
+    manifest_lock = threading.Lock()
 
-    for i, row in enumerate(candidates):
-        if _shutdown_requested:
-            break
-
-        progress = f"[{i + 1}/{len(candidates)}]"
+    def _upload_one(row: dict) -> tuple[dict, str, str]:
+        """Upload a single file. Returns (row, status, detail)."""
         file_path = data_dir / row["local_path"]
 
         if not file_path.exists():
-            row["upload_status"] = "failed"
-            row["upload_error"] = "File not found locally"
-            failed += 1
-            print(f"  {progress} MISS #{row['old_id']} {row['filename']}: file not found")
-            continue
+            return (row, "missing", "File not found locally")
 
         try:
-            # Extract metadata from .ulg
             metadata = extract_metadata(str(file_path), original_filename=row["filename"])
 
             drone_model = _determine_drone_model(
@@ -454,7 +469,6 @@ def cmd_upload(args):
                 metadata.get("serial_number"), row["serial_old"]
             )
             tow = AUTOSTART_TO_TOW.get(drone_model)
-
             title = row["filename"].removesuffix(".ulg")
 
             form_data = {
@@ -480,37 +494,62 @@ def cmd_upload(args):
 
             if resp.status_code == 201:
                 new_id = resp.json().get("id", "")
-                row["upload_status"] = "uploaded"
-                row["upload_error"] = ""
-                row["new_id"] = new_id
-                uploaded += 1
-                print(f"  {progress} OK  #{row['old_id']} {row['filename']}")
+                return (row, "uploaded", new_id)
             elif resp.status_code == 409:
-                row["upload_status"] = "duplicate"
-                row["upload_error"] = ""
-                duplicates += 1
-                print(f"  {progress} DUP #{row['old_id']} {row['filename']}")
+                return (row, "duplicate", "")
             else:
                 detail = ""
                 try:
                     detail = resp.json().get("detail", resp.text)
                 except Exception:
                     detail = resp.text or f"HTTP {resp.status_code}"
+                return (row, "failed", str(detail)[:200])
+
+        except Exception as e:
+            return (row, "failed", str(e)[:200])
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {}
+        for row in candidates:
+            if _shutdown_requested:
+                break
+            fut = pool.submit(_upload_one, row)
+            futures[fut] = row
+
+        for fut in as_completed(futures):
+            if _shutdown_requested:
+                pool.shutdown(wait=False, cancel_futures=True)
+                break
+
+            row, status, detail = fut.result()
+            completed_count += 1
+            progress = f"[{completed_count}/{total}]"
+
+            if status == "uploaded":
+                row["upload_status"] = "uploaded"
+                row["upload_error"] = ""
+                row["new_id"] = detail
+                uploaded += 1
+                print(f"  {progress} OK  #{row['old_id']} {row['filename']}")
+            elif status == "duplicate":
+                row["upload_status"] = "duplicate"
+                row["upload_error"] = ""
+                duplicates += 1
+                print(f"  {progress} DUP #{row['old_id']} {row['filename']}")
+            elif status == "missing":
                 row["upload_status"] = "failed"
-                row["upload_error"] = str(detail)[:200]
+                row["upload_error"] = detail
+                failed += 1
+                print(f"  {progress} MISS #{row['old_id']} {row['filename']}")
+            else:
+                row["upload_status"] = "failed"
+                row["upload_error"] = detail
                 failed += 1
                 print(f"  {progress} ERR #{row['old_id']} {row['filename']}: {detail}")
 
-        except Exception as e:
-            row["upload_status"] = "failed"
-            row["upload_error"] = str(e)[:200]
-            failed += 1
-            print(f"  {progress} ERR #{row['old_id']} {row['filename']}: {e}")
-
-        batch_counter += 1
-        if batch_counter >= args.batch_size:
-            save_manifest(manifest_path, rows)
-            batch_counter = 0
+            if completed_count % args.batch_size == 0:
+                with manifest_lock:
+                    save_manifest(manifest_path, rows)
 
     save_manifest(manifest_path, rows)
 
@@ -663,6 +702,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=100,
         help="Rows per page when scraping (default: 100)",
     )
+    p_scrape.add_argument(
+        "--workers",
+        type=int,
+        default=6,
+        help="Parallel download threads (default: 6)",
+    )
 
     # --- upload ---
     p_upload = sub.add_parser("upload", help="Upload downloaded .ulg files to new system")
@@ -691,6 +736,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Show what would be uploaded without doing it",
+    )
+    p_upload.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Parallel upload threads (default: 4)",
     )
 
     # --- status ---
