@@ -529,6 +529,7 @@ async def create_log(
         "169250": "4006",  # XLT
         "169251": "4010",  # S1
         "169252": "4030",  # CX10
+        "133700": "4010",  # Prototype S1
     }
     KNOWN_MODELS = {"4006", "4010", "4030"}
     final_drone_model = drone_model
