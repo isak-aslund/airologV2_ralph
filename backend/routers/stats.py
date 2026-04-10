@@ -295,6 +295,8 @@ async def get_records(
 class PilotMergeRequest(BaseModel):
     from_name: str
     to_name: str
+    before_date: str | None = None
+    after_date: str | None = None
 
 
 class PilotMergeResponse(BaseModel):
@@ -308,27 +310,48 @@ async def merge_pilot(
     request: PilotMergeRequest,
     db: Session = Depends(get_db),
 ) -> dict:
-    """Rename all logs from one pilot name to another."""
+    """Rename logs from one pilot name to another.
+
+    Optionally filter by date range:
+    - before_date: only rename logs with flight_date before this (YYYY-MM-DD)
+    - after_date: only rename logs with flight_date on or after this (YYYY-MM-DD)
+    """
     from_name = request.from_name.strip()
     to_name = request.to_name.strip().title()
 
     if not from_name or not to_name:
         raise HTTPException(status_code=400, detail="Both from_name and to_name are required")
 
-    count = (
-        db.query(FlightLog)
-        .filter(FlightLog.pilot == from_name)
-        .count()
-    )
+    query = db.query(FlightLog).filter(FlightLog.pilot == from_name)
+
+    if request.before_date:
+        try:
+            cutoff = datetime.fromisoformat(request.before_date)
+            query = query.filter(FlightLog.flight_date < cutoff)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid before_date format, use YYYY-MM-DD")
+
+    if request.after_date:
+        try:
+            cutoff = datetime.fromisoformat(request.after_date)
+            query = query.filter(FlightLog.flight_date >= cutoff)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid after_date format, use YYYY-MM-DD")
+
+    count = query.count()
 
     if count == 0:
-        raise HTTPException(status_code=404, detail=f"No logs found for pilot '{from_name}'")
+        raise HTTPException(status_code=404, detail=f"No matching logs found for pilot '{from_name}'")
 
-    db.execute(
-        update(FlightLog)
-        .where(FlightLog.pilot == from_name)
-        .values(pilot=to_name)
-    )
+    # Build the same filter for the update
+    stmt = update(FlightLog).where(FlightLog.pilot == from_name)
+    if request.before_date:
+        stmt = stmt.where(FlightLog.flight_date < datetime.fromisoformat(request.before_date))
+    if request.after_date:
+        stmt = stmt.where(FlightLog.flight_date >= datetime.fromisoformat(request.after_date))
+    stmt = stmt.values(pilot=to_name)
+
+    db.execute(stmt)
     db.commit()
 
     return {"updated": count, "from_name": from_name, "to_name": to_name}
