@@ -524,12 +524,24 @@ async def create_log(
     # Get or create tags
     tag_objects = get_or_create_tags(db, tag_names)
 
+    # Resolve drone_model: if not a known model, try serial prefix
+    SERIAL_PREFIX_TO_MODEL = {
+        "169250": "4006",  # XLT
+        "169251": "4010",  # S1
+        "169252": "4030",  # CX10
+    }
+    KNOWN_MODELS = {"4006", "4010", "4030"}
+    final_drone_model = drone_model
+    if drone_model not in KNOWN_MODELS and final_serial_number:
+        prefix = final_serial_number[:6]
+        final_drone_model = SERIAL_PREFIX_TO_MODEL.get(prefix, drone_model)
+
     # Create flight log record
     flight_log = FlightLog(
         id=log_id,
         title=title,
         pilot=pilot.strip().title(),
-        drone_model=drone_model,
+        drone_model=final_drone_model,
         serial_number=final_serial_number,
         log_identifier=log_identifier,
         file_path=str(file_path),
