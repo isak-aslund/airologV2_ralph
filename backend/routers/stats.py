@@ -385,6 +385,40 @@ async def normalize_pilot_casing(
     return {"changes": changes, "total_updated": sum(c["count"] for c in changes)}
 
 
+@router.post("/drone-models/fix-by-serial")
+async def fix_drone_models_by_serial(
+    db: Session = Depends(get_db),
+) -> dict:
+    """Fix drone_model for logs with non-standard SYS_AUTOSTART using serial prefix.
+
+    169250* -> 4006 (XLT), 169251* -> 4010 (S1), 169252* -> 4030 (CX10).
+    Anything else -> Unknown.
+    """
+    known = {"4006", "4010", "4030"}
+    prefix_map = {
+        "169250": "4006",
+        "169251": "4010",
+        "169252": "4030",
+    }
+
+    logs = (
+        db.query(FlightLog)
+        .filter(FlightLog.drone_model.notin_(known))
+        .all()
+    )
+
+    changes = []
+    for log in logs:
+        serial = log.serial_number or ""
+        new_model = prefix_map.get(serial[:6], "Unknown")
+        if new_model != log.drone_model:
+            changes.append({"old": log.drone_model, "new": new_model, "serial": serial})
+            log.drone_model = new_model
+
+    db.commit()
+    return {"fixed": len(changes), "total_checked": len(logs)}
+
+
 @router.post("/extract-metadata", response_model=ExtractedMetadataResponse)
 async def extract_file_metadata(
     file: UploadFile = File(...),
