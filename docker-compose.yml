@@ -17,6 +17,11 @@ services:
     build:
       context: .
       dockerfile: nginx/Dockerfile
+      args:
+        # Set APP_VERSION in the host environment to label the build (e.g.
+        # `APP_VERSION=$(git describe --tags --always --dirty) docker compose up --build`).
+        # Falls back to "dev" if unset.
+        APP_VERSION: ${APP_VERSION:-dev}
     restart: unless-stopped
     ports:
       - "80:80"
