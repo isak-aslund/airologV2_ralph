@@ -5,6 +5,10 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ .
 RUN rm -f public/img && mkdir -p public/img
+# Build-time version string. Passed in from docker-compose; vite picks it up
+# via VITE_APP_VERSION and inlines it into the bundle.
+ARG APP_VERSION=dev
+ENV VITE_APP_VERSION=${APP_VERSION}
 RUN npm run build
 
 # Stage 2: nginx
