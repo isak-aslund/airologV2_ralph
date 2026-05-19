@@ -328,6 +328,28 @@ export function createLogRequestDataMessage(
 }
 
 /**
+ * Create a LOG_REQUEST_END message
+ * Tells the drone to stop sending log data and exit the log-streaming state.
+ * Sent on successful completion, abort, or fatal failure of a download.
+ *
+ * @param targetSysId - Target system ID (drone)
+ * @param targetCompId - Target component ID
+ */
+export function createLogRequestEndMessage(
+  targetSysId: number,
+  targetCompId: number = MAV_COMP_ID_AUTOPILOT1,
+): Uint8Array {
+  // LOG_REQUEST_END payload:
+  // target_system: uint8 (offset 0)
+  // target_component: uint8 (offset 1)
+  const payload = new Uint8Array(2)
+  payload[0] = targetSysId
+  payload[1] = targetCompId
+
+  return createMAVLinkMessage(MSG_ID_LOG_REQUEST_END, payload, 255, MAV_COMP_ID_ALL, getNextSeq())
+}
+
+/**
  * Parse a LOG_ENTRY message payload
  * MAVLink wire format (sorted by type size):
  * time_utc: uint32 (offset 0-3)

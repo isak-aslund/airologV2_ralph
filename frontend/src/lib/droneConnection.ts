@@ -10,6 +10,7 @@ import {
   createHeartbeatMessage,
   createLogRequestListMessage,
   createLogRequestDataMessage,
+  createLogRequestEndMessage,
   MSG_ID_HEARTBEAT,
   MSG_ID_LOG_ENTRY,
   MSG_ID_LOG_DATA,
@@ -29,8 +30,75 @@ import type {
 const BAUD_RATE = 921600 // High baud rate for faster transfers (fallback to 115200 if needed)
 const HEARTBEAT_INTERVAL_MS = 1000 // Send heartbeat every 1 second
 const LOG_LIST_TIMEOUT_MS = 5000 // Timeout for log list request
-const LOG_DATA_TIMEOUT_MS = 10000 // Timeout for data chunk request
-const LOG_REQUEST_CHUNK_SIZE = 32768 // Request 32KB at a time (drone streams back as multiple 90-byte messages)
+
+// Download tuning
+// First-byte timeout is much longer because the drone may need to close the
+// previous log file, open a new one, and seek before sending any LOG_DATA.
+// Once data is streaming, a shorter idle timeout catches dropped packets fast.
+const LOG_DATA_IDLE_MS_FIRST_BYTE = 6000
+const LOG_DATA_IDLE_MS_MID_STREAM = 1500
+const LOG_DOWNLOAD_MAX_STALL_ROUNDS = 10 // Max consecutive idle rounds with zero new bytes before failing
+const LOG_DOWNLOAD_INITIAL_CHUNK = 16 * 1024 * 1024 // First request size; covers all small logs in one shot
+
+/**
+ * Sparse set of received byte ranges, merged on insert.
+ * Used to detect gaps in a serial log download where individual MAVLink
+ * LOG_DATA messages may have been dropped.
+ *
+ * Ranges are stored as half-open intervals [start, end), sorted by start.
+ */
+class ReceivedRanges {
+  private ranges: Array<[number, number]> = []
+
+  /** Insert [start, end), merging with any neighbours it touches or overlaps. */
+  add(start: number, end: number): void {
+    if (end <= start) return
+    let i = 0
+    while (i < this.ranges.length && this.ranges[i][1] < start) i++
+    if (i === this.ranges.length) {
+      this.ranges.push([start, end])
+      return
+    }
+    if (this.ranges[i][0] > end) {
+      this.ranges.splice(i, 0, [start, end])
+      return
+    }
+    let mergedStart = Math.min(this.ranges[i][0], start)
+    let mergedEnd = Math.max(this.ranges[i][1], end)
+    let j = i + 1
+    while (j < this.ranges.length && this.ranges[j][0] <= mergedEnd) {
+      mergedEnd = Math.max(mergedEnd, this.ranges[j][1])
+      j++
+    }
+    this.ranges.splice(i, j - i, [mergedStart, mergedEnd])
+  }
+
+  /** Sum of unique bytes covered in [0, upTo). */
+  totalReceived(upTo: number): number {
+    let total = 0
+    for (const [s, e] of this.ranges) {
+      if (s >= upTo) break
+      total += Math.min(e, upTo) - s
+    }
+    return total
+  }
+
+  /** First missing [start, end) within [0, upTo), or null if fully covered. */
+  firstMissing(upTo: number): [number, number] | null {
+    let cursor = 0
+    for (const [s, e] of this.ranges) {
+      if (s > cursor) return [cursor, Math.min(s, upTo)]
+      cursor = Math.max(cursor, e)
+      if (cursor >= upTo) return null
+    }
+    if (cursor < upTo) return [cursor, upTo]
+    return null
+  }
+
+  isComplete(totalSize: number): boolean {
+    return this.firstMissing(totalSize) === null
+  }
+}
 
 // Connection state
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected'
@@ -384,13 +452,18 @@ export class DroneConnection {
   }
 
   /**
-   * Download a single log from the drone
-   * Sends LOG_REQUEST_DATA messages and collects LOG_DATA responses
+   * Download a single log from the drone.
    *
-   * @param logEntry - The log entry to download (from requestLogList)
-   * @param onProgress - Optional callback for progress updates
-   * @param abortSignal - Optional AbortSignal to cancel the download
-   * @returns Promise that resolves with the downloaded log as a Blob
+   * Sends LOG_REQUEST_DATA messages and collects LOG_DATA responses. The
+   * MAVLink log-download protocol over a serial link can drop individual
+   * LOG_DATA messages and the autopilot will not retransmit them on its own,
+   * so this implementation tracks received byte ranges and re-requests any
+   * gaps until the file is whole. Bytes that arrive past the declared file
+   * size are clipped (some autopilots send a final 90-byte chunk that
+   * overshoots) so we never corrupt the final blob with a buffer overflow.
+   *
+   * On success, failure, or abort, a LOG_REQUEST_END is sent so the drone
+   * exits log-streaming mode and the next download starts from a clean state.
    */
   async downloadLog(
     logEntry: DroneLogEntry,
@@ -405,38 +478,72 @@ export class DroneConnection {
       throw new Error('Drone system ID not yet received. Wait for heartbeat.')
     }
 
-    return new Promise<DownloadedLog>((resolve, reject) => {
-      const logId = logEntry.id
-      const totalSize = logEntry.size
-      const chunks: Map<number, Uint8Array> = new Map() // offset -> data
-      let bytesReceived = 0
-      let currentOffset = 0
-      let timeoutId: ReturnType<typeof setTimeout> | null = null
-      let isComplete = false
-      const startTime = Date.now() // Track start time for speed calculation
+    const droneSysId = this._droneSysId
+    const logId = logEntry.id
+    const totalSize = logEntry.size
 
-      // Store the original onLogData handler
+    if (totalSize === 0) {
+      return {
+        id: logId,
+        blob: new Blob([], { type: 'application/octet-stream' }),
+        timeUtc: logEntry.timeUtc,
+      }
+    }
+
+    const sendLogRequestEnd = async (): Promise<void> => {
+      try {
+        const endMsg = createLogRequestEndMessage(droneSysId, MAV_COMP_ID_AUTOPILOT1)
+        await this.send(endMsg)
+      } catch {
+        // Best-effort; failures here are not the user's problem.
+      }
+    }
+
+    return new Promise<DownloadedLog>((resolve, reject) => {
+      const buffer = new Uint8Array(totalSize)
+      const received = new ReceivedRanges()
+      const startTime = Date.now()
+
+      let isSettled = false
+      let idleTimer: ReturnType<typeof setTimeout> | null = null
+      let stallRounds = 0
+      let bytesAtLastIdleCheck = 0
+      let pendingRequest: [number, number] | null = null
+
       const originalOnLogData = this.events.onLogData
 
-      // Cleanup function
       const cleanup = () => {
-        if (timeoutId) {
-          clearTimeout(timeoutId)
-          timeoutId = null
+        if (idleTimer !== null) {
+          clearTimeout(idleTimer)
+          idleTimer = null
         }
-        // Remove abort listener if it exists
         abortSignal?.removeEventListener('abort', handleAbort)
-        // Restore original handler
         this.events.onLogData = originalOnLogData
       }
 
-      // Handle abort signal
-      const handleAbort = () => {
+      const succeed = () => {
+        if (isSettled) return
+        isSettled = true
         cleanup()
-        reject(new Error('Download cancelled'))
+        // Don't send LOG_REQUEST_END on success: the drone naturally returns to
+        // idle after sending all the bytes we asked for, and explicitly ending
+        // the session can leave some autopilots slow to re-engage when the next
+        // download immediately follows.
+        const blob = new Blob([buffer], { type: 'application/octet-stream' })
+        resolve({ id: logId, blob, timeUtc: logEntry.timeUtc })
       }
 
-      // Set up abort listener
+      const fail = (error: Error) => {
+        if (isSettled) return
+        isSettled = true
+        cleanup()
+        // On abort/failure, tell the drone to stop streaming so it isn't still
+        // pumping LOG_DATA at us when the user starts a new download.
+        sendLogRequestEnd().finally(() => reject(error))
+      }
+
+      const handleAbort = () => fail(new Error('Download cancelled'))
+
       if (abortSignal) {
         if (abortSignal.aborted) {
           reject(new Error('Download cancelled'))
@@ -445,122 +552,130 @@ export class DroneConnection {
         abortSignal.addEventListener('abort', handleAbort)
       }
 
-      // Reset timeout on each data chunk received
-      const resetTimeout = () => {
-        if (timeoutId) {
-          clearTimeout(timeoutId)
-        }
-        timeoutId = setTimeout(() => {
-          cleanup()
-          if (bytesReceived === 0) {
-            reject(new Error('Timeout: No data received from drone.'))
-          } else if (bytesReceived < totalSize) {
-            reject(new Error(`Download incomplete: received ${bytesReceived} of ${totalSize} bytes`))
-          }
-        }, LOG_DATA_TIMEOUT_MS)
-      }
-
-      // Track what we've requested
-      let requestedUpTo = 0
-
-      // Request next chunk of data (4KB at a time)
-      const requestNextChunk = () => {
-        if (requestedUpTo >= totalSize || isComplete) {
-          return
-        }
-
-        const remaining = totalSize - requestedUpTo
-        const chunkSize = Math.min(remaining, LOG_REQUEST_CHUNK_SIZE)
-
-        const requestMessage = createLogRequestDataMessage(
-          this._droneSysId!,
-          MAV_COMP_ID_AUTOPILOT1,
+      const reportProgress = () => {
+        if (!onProgress) return
+        const bytesReceived = received.totalReceived(totalSize)
+        const elapsedSeconds = (Date.now() - startTime) / 1000
+        const speedKBps = elapsedSeconds > 0 ? bytesReceived / 1024 / elapsedSeconds : 0
+        onProgress({
           logId,
-          requestedUpTo,
-          chunkSize
-        )
-
-        requestedUpTo += chunkSize
-
-        this.send(requestMessage).catch((error) => {
-          cleanup()
-          reject(error)
+          bytesReceived,
+          totalBytes: totalSize,
+          percent: Math.round((bytesReceived / totalSize) * 100),
+          speedKBps: Math.round(speedKBps * 10) / 10,
         })
       }
 
-      // Assemble all chunks into final blob
-      const assembleBlob = (): Blob => {
-        // Create a single contiguous buffer and copy each chunk to its proper position
-        const buffer = new Uint8Array(totalSize)
-
-        for (const [offset, data] of chunks) {
-          buffer.set(data, offset)
-        }
-
-        return new Blob([buffer], { type: 'application/octet-stream' })
+      const scheduleIdleTimer = () => {
+        if (idleTimer !== null) clearTimeout(idleTimer)
+        // Give the drone significantly more time on the very first byte —
+        // opening a new log file and seeking can easily take a few seconds,
+        // and re-requesting too eagerly just makes the drone restart the
+        // file-open and we never make progress.
+        const haveAnyBytes = received.totalReceived(totalSize) > 0
+        const delay = haveAnyBytes
+          ? LOG_DATA_IDLE_MS_MID_STREAM
+          : LOG_DATA_IDLE_MS_FIRST_BYTE
+        idleTimer = setTimeout(handleIdle, delay)
       }
 
-      // Set up handler to collect LOG_DATA messages
-      this.events.onLogData = (data) => {
-        // Call original handler if it exists
-        originalOnLogData?.(data)
+      const requestRange = (offset: number, count: number) => {
+        pendingRequest = [offset, offset + count]
+        const msg = createLogRequestDataMessage(
+          droneSysId,
+          MAV_COMP_ID_AUTOPILOT1,
+          logId,
+          offset,
+          count,
+        )
+        this.send(msg).catch((error) => fail(error as Error))
+        scheduleIdleTimer()
+      }
 
-        // Only process data for our log
-        if (data.id !== logId) {
+      const requestNextMissing = () => {
+        const missing = received.firstMissing(totalSize)
+        if (!missing) {
+          succeed()
+          return
+        }
+        const [start, end] = missing
+        // Cap each request size so we don't ask for absurd amounts on a freshly
+        // started download; subsequent rounds will fetch the next gap.
+        const count = Math.min(end - start, LOG_DOWNLOAD_INITIAL_CHUNK)
+        console.log(
+          `[DroneConnection] Requesting log ${logId} bytes ${start}-${start + count - 1} (${count} bytes)`,
+        )
+        requestRange(start, count)
+      }
+
+      const handleIdle = () => {
+        if (isSettled) return
+        const bytesReceived = received.totalReceived(totalSize)
+        if (bytesReceived === bytesAtLastIdleCheck) {
+          stallRounds++
+        } else {
+          stallRounds = 0
+          bytesAtLastIdleCheck = bytesReceived
+        }
+        if (stallRounds >= LOG_DOWNLOAD_MAX_STALL_ROUNDS) {
+          const missing = received.firstMissing(totalSize)
+          const missingDesc = missing ? `${missing[0]}-${missing[1]}` : 'unknown'
+          fail(
+            new Error(
+              `Download stalled: received ${bytesReceived} of ${totalSize} bytes; first missing range ${missingDesc}`,
+            ),
+          )
+          return
+        }
+        if (received.isComplete(totalSize)) {
+          succeed()
+          return
+        }
+        console.log(
+          `[DroneConnection] Idle with ${bytesReceived}/${totalSize} bytes, re-requesting first gap (stall round ${stallRounds})`,
+        )
+        requestNextMissing()
+      }
+
+      this.events.onLogData = (data) => {
+        originalOnLogData?.(data)
+        if (isSettled) return
+        if (data.id !== logId) return
+
+        // Clip the incoming chunk to the declared file size. Some autopilots
+        // (ArduPilot in particular) send a final LOG_DATA whose ofs+count
+        // exceeds the size reported in LOG_ENTRY by a few bytes.
+        const start = data.ofs
+        if (start >= totalSize) return
+        const end = Math.min(data.ofs + data.count, totalSize)
+        if (end <= start) return
+        const writeLen = end - start
+
+        buffer.set(data.data.subarray(0, writeLen), start)
+        received.add(start, end)
+
+        reportProgress()
+
+        if (received.isComplete(totalSize)) {
+          succeed()
           return
         }
 
-        // Store the chunk
-        if (!chunks.has(data.ofs)) {
-          chunks.set(data.ofs, data.data)
-          bytesReceived += data.count
-
-          // Track highest offset received for requesting more data
-          const endOffset = data.ofs + data.count
-          if (endOffset > currentOffset) {
-            currentOffset = endOffset
-          }
+        // If we've drained the most recently requested range, eagerly ask
+        // for the next gap rather than waiting for the idle timer.
+        if (pendingRequest && end >= pendingRequest[1]) {
+          pendingRequest = null
+          requestNextMissing()
+          return
         }
 
-        // Report progress with speed calculation
-        if (onProgress) {
-          const elapsedSeconds = (Date.now() - startTime) / 1000
-          const speedKBps = elapsedSeconds > 0 ? (bytesReceived / 1024) / elapsedSeconds : 0
-          onProgress({
-            logId,
-            bytesReceived,
-            totalBytes: totalSize,
-            percent: Math.round((bytesReceived / totalSize) * 100),
-            speedKBps: Math.round(speedKBps * 10) / 10, // Round to 1 decimal
-          })
-        }
-
-        // Reset timeout since we received data
-        resetTimeout()
-
-        // Check if we've received all data
-        if (bytesReceived >= totalSize) {
-          isComplete = true
-          cleanup()
-
-          // Assemble the blob
-          const blob = assembleBlob()
-          resolve({
-            id: logId,
-            blob,
-            timeUtc: logEntry.timeUtc,
-          })
-        } else if (currentOffset >= requestedUpTo && requestedUpTo < totalSize) {
-          // We've received all data from current request, request more
-          requestNextChunk()
-        }
+        scheduleIdleTimer()
       }
 
-      // Start timeout
-      resetTimeout()
-
-      // Start requesting data from the beginning
-      requestNextChunk()
+      // Kick off: ask for the whole file in one request. The drone will stream
+      // it back as a long sequence of 90-byte LOG_DATA messages, and any
+      // dropped chunks will be picked up by the idle/gap-recovery path.
+      requestNextMissing()
     })
   }
 
